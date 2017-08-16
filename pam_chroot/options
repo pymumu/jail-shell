@@ -1,0 +1,30 @@
+debug - Output lots of extra debugging info via syslog
+
+no_warn - Do not print warning messages to STDOUT.  (Equivalent to passing
+  the PAM_SILENT flag.)
+
+use_first_pass, try_first_pass, use_mapped_pass - Nothing.
+
+no_chroot - Don't really chroot, but do everything else normally.
+
+use_regex - Treat the name field of the chroot.conf file as if it were a
+  regular expression.
+
+use_ext_regex - Use extended regular expressions.  Implies use_regex.
+
+use_groups - Allow "@group" syntax for name field in chroot.conf
+
+sec_checks - Check permissions and modes on conf files and chroot paths, return
+  PAM_SESSION_ERR if bad ownership/perms are found.
+
+notfound=(success|failure) - Return PAM_SUCCESS or PAM_SESSION_ERR,
+  respectively, if the chroot_dir for the current user cannot be determined.
+  Default is to return PAM_SUCCESS.
+
+onerr=(succeed|fail) - Return PAM_SUCCESS or PAM_SESSION_ERR, respectively, if
+  the chroot_dir for the current user cannot be determined.  Default is to
+  return PAM_SUCCESS.
+
+chroot_dir=<dir> - Specify the chroot_dir.  Overrides anything that might be in
+  the chroot.conf file.  In fact, chroot.conf won't even be consulted.
+

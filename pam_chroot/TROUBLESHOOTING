@@ -1,0 +1,61 @@
+Troubleshooting chroots is usually hairy, which is why pam_chroot puts out
+so many syslog messages.  This file contains a few things to check on if
+you're having problems.  If you don't find the answer here, then you may
+also want to check the pam-list archives.
+
+Note that all of the following assumes that you have put pam_chroot into
+debug mode (add the "debug" option to the pam_chroot line in the
+appropriate /etc/pam.d file) and that syslogd is configured to put
+auth.debug messages in some known location (/var/log/messages,
+/var/adm/messages, /var/adm/syslog/syslog.log, etc.)
+
+Under normal operation, pam_chroot will output something similar to the
+following messages when it is in debug mode:
+
+Oct 17 08:38:23 nell pam_chroot[25932]: session: reading config file (/etc/security/chroot.conf)
+Oct 17 08:38:23 nell pam_chroot[25932]: session: expanded path "/chroot" -> "/chroot"
+Oct 17 08:38:23 nell pam_chroot[25932]: session: found chroot_dir "/chroot" for user "schmolli"
+Oct 17 08:38:23 nell pam_chroot[25932]: session: preparing to chroot()
+Oct 17 08:38:23 nell pam_chroot[25932]: session: chroot(/chroot) ok
+Oct 17 08:38:23 nell pam_chroot[25932]: session: returning success
+
+NOTE: the "preparing to chroot()" message is new as of pam_chroot-0.7
+
+If something had gone wrong with the above session, you would have seen a
+message stating what went wrong, and probably a message stating that an
+error was being returned.
+
+PROBLEM: No pam_chroot syslog messages after the "calling chroot" message
+SOLUTION: This usually happens when the chroot() succeeds, but there is
+  no syslogd socket listening inside the chroot.  pam_chroot is still
+  trying to syslog those messages, but syslogd isn't hearing them.  You
+  can fix this by "making syslogd work inside the chroot."  The way you
+  do that varies by OS.  Check the man pages for syslogd.
+  On linux: add "-a /chroot/dev/log" as an argument to syslogd in the
+    appropriate init.d script.
+  On solaris: add "-p /chroot/dev/log" as an argument to syslogd in the
+    appropriate init.d script.
+
+PROBLEM: No pam_chroot messages at all
+SOLUTION: This usually indicates that the pam_chroot module is not being
+  used at all.  This might be because you did not add it to the
+  appropriate /etc/pam.d file, or it might be that PAM is not being used
+  at all.  (For example, you might have set 'UsePAM no' in your
+  /etc/ssh/sshd_config.)  It might also be that syslogd is not running or
+  is not configured to report auth.debug messages in the file that you're
+  looking for them in.
+  There are a multitude of reasons that PAM might not be being used, and
+  they're usually application configuration issues, rather than issues with
+  PAM itself.
+  OpenSSH: Recent versions of OpenSSH require that the following be set in
+    your sshd_config:
+      ChallengeResponseAuthentication yes
+      UsePAM yes
+
+If all else fails, you can use a process tracing tool (strace under linux,
+truss under solaris, or tusc under HP) to figure out what calls your
+application is making, what files it is reading, etc.  That will usually
+provide you with a few clues.  This is ugly and possibly time-consuming,
+but then again, it's not really very easy to debug somebody else's chroot
+problem over email.
+

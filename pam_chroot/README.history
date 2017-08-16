@@ -1,0 +1,42 @@
+There are several versions of pam_chroot out there, and I see a bit of
+confusion regarding this fact when it comes up.  So here's everything I
+know.
+
+pam_chroot appears in the Linux-PAM documentation with the author
+listed as Bruce Campbell.  As far as I know, the partial module
+specification listed there is earnestly intended, but the author
+apparently never actually wrote the module or any other documentation.
+
+The closest I've found to an "original" version of pam_chroot is the
+one written by Matt Kirkwood.  That was pam_chroot-0.1, and this version
+had (at least) three forks:  RedHat's, Skip Carter's, and Ed
+Schmollinger's (hey, that's me!)
+
+RedHat's version, written by Nalin Dahyabhai (I think) did a
+considerable amount of cleanup on Kirkwood's version, and if I'd
+realized that it existed before I started my own modifications, I would
+probably not have bothered writing my own.  The RedHat version is
+actively maintained and is probably the one that sees the most
+widespread usage, since it is what is installed on some of the most
+popular distributions out there.  I also recently learned that Mandrake
+imported RedHat's wad of extra modules, so if you're on a Mandrake
+system, then you're probably using the RedHat module there as well.
+
+Skip Carter's version is a trivial modification that just does some
+extra syslogging.  That was the story in 2002, anyway, and I don't see
+any further development out there, so I'll leave it at that.
+
+The version written by Ed Schmollinger was also developed from Matt
+Kirkwood's module, though by the time the development was done, only
+about ten lines of code were the same.  The goal of this version was to
+actually comply with the specification given in the Linux-PAM
+documentation.  I'm unaware of any other module that does this, but that
+is probably more a reflection upon the very low demand for chrooting in
+anything other than the session phase of login than of any kind of
+shortcoming in other modules.
+
+Debian also has a pam_chroot module available now.  Since 2002, it
+looks like.  I'm fuzzy on the details, but it looks to me like they
+based it off of Schmollinger's pam_chroot-0.9, and then made some minor
+modifications.
+

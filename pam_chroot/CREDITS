@@ -1,0 +1,13 @@
+This version of pam_chroot was originally written by Matthew Kirkwood
+(weejock@ferret.lmh.ox.ac.uk) and then heavily modified by Ed
+Schmollinger (schmolli@frozencrow.org).  Bugs are likely attributable
+to schmolli, and that is who you should send bug reports to.
+
+The following have contributed non-trivial code and/or ideas:
+
+Heiko Hund <heiko@ist.eigentlich.net>
+  - fix memory leaks, expanded user/group regex support
+
+John Newbigin <jn@it.swin.edu.au>
+  - security checks for conf file & chroot directories
+
