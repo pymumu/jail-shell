@@ -14,6 +14,9 @@
 #include <unistd.h>
 #include <errno.h>
 #include <signal.h>
+#include <pty.h>
+#include <unistd.h>
+#include <stdlib.h>
 
 
 #define TMP_BUFF_LEN_32 32

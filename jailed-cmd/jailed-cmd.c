@@ -1,9 +1,6 @@
 
 #define _BSD_SOURCE
 #include "jailed-common.h"
-#include <pty.h>
-#include <unistd.h>
-#include <stdlib.h>
 
 #define JAILED_CMD_NAME "jailed-cmd"
 
@@ -66,7 +63,7 @@ int init_cmd(struct sock_data *send_data, int argc, char *argv[])
 		snprintf(cmd->term, TMP_BUFF_LEN_32, "xterm");
 	}
 	
-    if (ioctl(STDIN_FILENO, TIOCGWINSZ, &cmd->ws) != 0) {
+	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &cmd->ws) != 0) {
 		fprintf(stderr, "get console win size failed, %s", strerror(errno));
 		return 1;
 	}
@@ -126,7 +123,11 @@ int cmd_loop(int sock, struct sock_data *send_data, struct sock_data *recv_data)
 
 		retval = select(sock + 1, &rfds_set, &wfds_set, NULL, NULL);
 		if (retval < 0) {
-			continue;
+			if (errno == EINTR) {
+				continue;
+			}
+			fprintf(stderr, "select fd failed, %s\r\n", strerror(errno));
+			return 1;
 		} else if (retval == 0) {
 			continue;
 		} 
@@ -139,9 +140,10 @@ int cmd_loop(int sock, struct sock_data *send_data, struct sock_data *recv_data)
 
 			send_data->curr_offset += len;
 			
-			if (len >= send_data->total_len) {
+			if (send_data->curr_offset >= send_data->total_len) {
 				FD_CLR(sock, &wfds);
 				send_data->total_len = 0;
+				send_data->curr_offset = 0;
 			}
 		}
 
@@ -151,10 +153,10 @@ int cmd_loop(int sock, struct sock_data *send_data, struct sock_data *recv_data)
 				struct jailed_cmd_data *cmd_data = (struct jailed_cmd_data *)cmd_head->data;
 				cmd_head->magic = MSG_MAGIC;
 				cmd_head->type = CMD_MSG_DATA_IN;
-				len = read(0, cmd_data->data, sizeof(send_data->data) - sizeof(*cmd_data) - sizeof(*cmd_data));
+				len = read(0, cmd_data->data, sizeof(send_data->data) - sizeof(*cmd_head) - sizeof(*cmd_data));
 				if (len <= 0) {
 					FD_CLR(0, &rfds_set);
-					continue;
+					return 1;
 				}
 
 
@@ -162,17 +164,18 @@ int cmd_loop(int sock, struct sock_data *send_data, struct sock_data *recv_data)
 				send_data->total_len = sizeof(*cmd_head) + cmd_head->data_len;
 				send_data->curr_offset = 0;
 
-				if (len == 2 && strncmp(send_data->data, "^\[", 2) == 0) {
+				if (isatty(STDIN_FILENO) && len == 1 && cmd_data->data[0] == '\35') {
 					return 0;
 				}
 
 				FD_SET(sock, &wfds);
-
+			} else {
+				usleep(10000);
 			}
 		}
 
 		if (FD_ISSET(sock, &rfds_set)) {
-			len = recv(sock, recv_data->data, sizeof(recv_data->data), MSG_DONTWAIT);	
+			len = recv(sock, recv_data->data + recv_data->total_len, sizeof(recv_data->data) - recv_data->total_len, MSG_DONTWAIT);	
 			if (len < 0) {
 				return 1;
 			} else if (len == 0) {
@@ -193,13 +196,13 @@ int cmd_loop(int sock, struct sock_data *send_data, struct sock_data *recv_data)
 					case CMD_MSG_DATA_OUT:
 					{
 						struct jailed_cmd_data *cmd_data = (struct jailed_cmd_data *)cmd_head->data;
-						fprintf(stdout, "%s", cmd_data->data);
+						write(STDOUT_FILENO, cmd_data->data, cmd_head->data_len);
 						break;
 					}
 					case CMD_MSG_DATA_ERR:
 					{
 						struct jailed_cmd_data *cmd_data = (struct jailed_cmd_data *)cmd_head->data;
-						fprintf(stderr, "%s", cmd_data->data);
+						write(STDOUT_FILENO, cmd_data->data, cmd_head->data_len);
 						break;
 					}
 					case CMD_MSG_EXIT_CODE:
@@ -212,6 +215,14 @@ int cmd_loop(int sock, struct sock_data *send_data, struct sock_data *recv_data)
 						fprintf(stderr, "data type error.\r\n");
 						return 1;
 					}
+
+					int cmd_msg_len = sizeof(struct jailed_cmd_head) + cmd_head->data_len;
+					if (recv_data->total_len > cmd_msg_len) {
+						memmove(recv_data->data, recv_data->data + cmd_msg_len, recv_data->total_len - cmd_msg_len);
+					} 
+
+					recv_data->total_len = recv_data->total_len - cmd_msg_len;
+					recv_data->curr_offset = 0;
 				}
 			}
 		}
@@ -297,6 +308,7 @@ void signal_handler(int sig)
 	switch(sig) {
 	case SIGWINCH: 
 		window_size_changed = 1;
+		return;
 		break;
 	}
 	onexit();
