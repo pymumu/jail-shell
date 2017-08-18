@@ -19,25 +19,25 @@ void help(void)
 
 int create_pid_file(const char *pid_file)
 {
-    int fd;
+	int fd;
 	int flags;
 	char buff[TMP_BUFF_LEN_32];
 
-    fd = open(pid_file, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
-    if (fd == -1) {
+	fd = open(pid_file, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+	if (fd == -1) {
 		fprintf(stderr, "create pid file failed, %s", strerror(errno));
 		return 1;
 	}
 
-    flags = fcntl(fd, F_GETFD); 
-    if (flags < 0) {
-        fprintf(stderr, "Could not get flags for PID file %s", pid_file);
+	flags = fcntl(fd, F_GETFD); 
+	if (flags < 0) {
+		fprintf(stderr, "Could not get flags for PID file %s", pid_file);
 		goto errout;
 	}
 
-    flags |= FD_CLOEXEC; 
-    if (fcntl(fd, F_SETFD, flags) == -1) {
-        fprintf(stderr, "Could not set flags for PID file %s", pid_file);
+	flags |= FD_CLOEXEC; 
+	if (fcntl(fd, F_SETFD, flags) == -1) {
+		fprintf(stderr, "Could not set flags for PID file %s", pid_file);
 		goto errout;
 	}
 
@@ -53,7 +53,7 @@ int create_pid_file(const char *pid_file)
 		goto errout;
 	}
 
-    return fd;
+	return fd;
 errout:
 	if (fd > 0) {
 		close(fd);
@@ -61,10 +61,10 @@ errout:
 	return 1;
 }
 
-int start_process(struct jailed_cmd_cmd *cmd_cmd, int *mirror_in, int *mirror_out, int *mirror_err)
+int start_process(struct jailed_cmd_cmd *cmd_cmd, int *mirror, int *mirror_err)
 {
 	int argc = cmd_cmd->argc;
-	char **argv = malloc(argc * sizeof(char*));
+	char *argv[argc + 1];
 	int i = 0;
 	int len = 0;
 
@@ -72,7 +72,18 @@ int start_process(struct jailed_cmd_cmd *cmd_cmd, int *mirror_in, int *mirror_ou
 		argv[i] = cmd_cmd->argvs + len;
 		len += strlen(cmd_cmd->argvs + len) + 1;
 	}
+	argv[i] = 0;
+	
+	int pid = forkpty(mirror, NULL, NULL, &cmd_cmd->ws);
+	if (pid < 0) {
+		return 1;
+	} else if (pid == 0) {
+		execv(argv[0], argv);
+		printf(" : %s\n", strerror(errno));
+		_exit(0);
+	} else {
 
+	}
 	return 0;
 }
 
@@ -84,15 +95,14 @@ void server_loop(int sock, struct sock_data *send_data, struct sock_data *recv_d
 	fd_set wfds_set;
 	int len;
 	int retval;
-	int mirror_in = -1;
-	int mirror_out = -1;
+	int mirror = -1;
 	int mirror_err = -1;
+	int is_mirror_eof = 0;
 
 	FD_ZERO(&rfds);
 	FD_ZERO(&wfds);
 
 	FD_SET(sock, &rfds);
-	FD_SET(sock, &wfds);
 	
 	while (1) {
 
@@ -113,96 +123,124 @@ void server_loop(int sock, struct sock_data *send_data, struct sock_data *recv_d
 		if (FD_ISSET(sock, &wfds_set)) {
 			len = send(sock, send_data->data + send_data->curr_offset, send_data->total_len - send_data->curr_offset, MSG_NOSIGNAL | MSG_DONTWAIT);
 			if (len < 0) {
+				fprintf(stderr, "socket send failed,  %s\n", strerror(errno));
 				return ;
 			} 
 
 			send_data->curr_offset += len;
 			
-			if (send_data->curr_offset >= send_data->total_len) {
+			if (send_data->curr_offset == send_data->total_len) {
 				FD_CLR(sock, &wfds);
+				if (is_mirror_eof == 0) {
+					FD_SET(mirror, &rfds);
+				}
 				send_data->total_len = 0;
+				send_data->curr_offset = 0;
+			} else if (send_data->curr_offset > send_data->total_len) {
+				fprintf(stderr, "BUG: internal error, data length mismach\n");
+				return ;
+			} else {
+				memmove(send_data->data, send_data + send_data->curr_offset, send_data->total_len - send_data->curr_offset);
+				send_data->total_len =  send_data->total_len - send_data->curr_offset;
 				send_data->curr_offset = 0;
 			}
 		}
 
-		if (FD_ISSET(0, &rfds_set)) {
-        	if (send_data->total_len == 0) {
-				struct jailed_cmd_head *cmd_head = (struct jailed_cmd_head *)send_data->data;
-				struct jailed_cmd_data *cmd_data = (struct jailed_cmd_data *)cmd_head->data;
-				cmd_head->magic = MSG_MAGIC;
-				cmd_head->type = CMD_MSG_DATA_IN;
-				len = read(0, cmd_data->data, sizeof(send_data->data) - sizeof(*cmd_head) - sizeof(*cmd_data));
-				if (len <= 0) {
-					FD_CLR(0, &rfds_set);
-					return ;
-				}
-
-
-				cmd_head->data_len = len;
-				send_data->total_len = sizeof(*cmd_head) + cmd_head->data_len;
-				send_data->curr_offset = 0;
-
-				if (isatty(STDIN_FILENO) && len == 1 && send_data->data[0] == '\35') {
-					return ;
-				}
-
-				FD_SET(sock, &wfds);
-			} else {
-				usleep(10000);
+		if (FD_ISSET(mirror, &rfds_set)) {
+			int free_buff_size = sizeof(send_data->data)  - send_data->total_len;
+			int need_size = sizeof(struct jailed_cmd_head) + sizeof(struct jailed_cmd_data) + 16;
+			if ((free_buff_size - need_size) < 0) {
+				FD_CLR(mirror, &rfds);
+				continue;
 			}
+			struct jailed_cmd_head *cmd_head = (struct jailed_cmd_head *)(send_data->data + send_data->total_len);
+			struct jailed_cmd_data *cmd_data = (struct jailed_cmd_data *)cmd_head->data;
+			cmd_head->magic = MSG_MAGIC;
+			cmd_head->type = CMD_MSG_DATA_OUT;
+			len = read(mirror, cmd_data->data, free_buff_size - sizeof(struct jailed_cmd_head) - sizeof(struct jailed_cmd_data));
+			if (len < 0) {
+				fprintf(stderr, "read mirror failed, %s\n", strerror(errno));
+				FD_CLR(mirror, &rfds);
+				return ;
+			} 
+
+			cmd_head->data_len = len + sizeof(*cmd_data);
+			send_data->total_len += sizeof(*cmd_head) + cmd_head->data_len;
+
+			if (len == 0 ) {
+				FD_CLR(mirror, &rfds);
+				is_mirror_eof = !len;
+				struct jailed_cmd_head *cmd_head_send = (struct jailed_cmd_head *)(send_data->data + send_data->total_len);
+				cmd_head_send->magic = MSG_MAGIC;
+				cmd_head_send->type = CMD_MSG_DATA_EXIT;
+				cmd_head_send->data_len = 0;
+				send_data->total_len += sizeof(*cmd_head_send) + cmd_head->data_len;
+			}
+
+			FD_SET(sock, &wfds);
 		}
 
 		if (FD_ISSET(sock, &rfds_set)) {
 			len = recv(sock, recv_data->data + recv_data->total_len, sizeof(recv_data->data) - recv_data->total_len, MSG_DONTWAIT);	
 			if (len < 0) {
+				fprintf(stderr, "recv from socket failed, %s\n", strerror(errno));
 				return ;
 			} else if (len == 0) {
-				fprintf(stdout, "peer close\r\n");
 				return ;
 			}
 
 			recv_data->total_len += len;
-			if (recv_data->total_len >= sizeof(struct jailed_cmd_head)) {
-				struct jailed_cmd_head *cmd_head = (struct jailed_cmd_head *)recv_data->data;
-				if (cmd_head->magic != MSG_MAGIC || cmd_head->data_len > sizeof(recv_data->data) - sizeof(struct jailed_cmd_head)) {
-					fprintf(stderr, "Data error.\r\n");
-					return ;
-				}
-
-				if (recv_data->total_len >= sizeof(struct jailed_cmd_head) + cmd_head->data_len) {
-					switch (cmd_head->type) {
-					case CMD_MSG_CMD:
-					{
-						struct jailed_cmd_cmd *cmd_cmd = (struct jailed_cmd_cmd *)cmd_head->data;
-						start_process(cmd_cmd, &mirror_in, &mirror_out, &mirror_err);
-						break;
-					}
-					case CMD_MSG_DATA_IN:
-					{
-						struct jailed_cmd_data *cmd_data = (struct jailed_cmd_data *)cmd_head->data;
-						write(STDOUT_FILENO, cmd_data->data, cmd_head->data_len);
-						break;
-					}
-					case CMD_MSG_WINSIZE:
-					{
-						struct jailed_cmd_data *cmd_data = (struct jailed_cmd_data *)cmd_head->data;
-						write(STDOUT_FILENO, cmd_data->data, cmd_head->data_len);
-						break;
-					}
-					default:
-						fprintf(stderr, "data type error.\r\n");
+			while (1) {
+				if (recv_data->total_len >= sizeof(struct jailed_cmd_head)) {
+					struct jailed_cmd_head *cmd_head = (struct jailed_cmd_head *)recv_data->data;
+					if (cmd_head->magic != MSG_MAGIC || cmd_head->data_len > sizeof(recv_data->data) - sizeof(struct jailed_cmd_head)) {
+						fprintf(stderr, "Data invalid, magic%llX:%llX, len=%d:%d.\n", 
+								cmd_head->magic, MSG_MAGIC, cmd_head->data_len, sizeof(recv_data));
 						return ;
 					}
 
-					int cmd_msg_len = sizeof(struct jailed_cmd_head) + cmd_head->data_len;
-					if (recv_data->total_len > cmd_msg_len) {
-						memmove(recv_data->data, recv_data->data + cmd_msg_len, recv_data->total_len - cmd_msg_len);
-					} 
+					if (recv_data->total_len >= sizeof(struct jailed_cmd_head) + cmd_head->data_len) {
+						switch (cmd_head->type) {
+						case CMD_MSG_CMD:
+						{
+							struct jailed_cmd_cmd *cmd_cmd = (struct jailed_cmd_cmd *)cmd_head->data;
+							start_process(cmd_cmd, &mirror, &mirror_err);
+							FD_SET(mirror, &rfds);
+							break;
+						}
+						case CMD_MSG_DATA_IN:
+						{
+							struct jailed_cmd_data *cmd_data = (struct jailed_cmd_data *)cmd_head->data;
+							write(mirror, cmd_data->data, cmd_head->data_len);
+							break;
+						}
+						case CMD_MSG_DATA_EXIT:
+						{
+							return;
+						}
+						case CMD_MSG_WINSIZE:
+						{
+							struct jailed_cmd_winsize *cmd_winsize = (struct jailed_cmd_winsize *)cmd_head->data;
+							ioctl(mirror, TIOCSWINSZ, &cmd_winsize->ws);
+							break;
+						}
+						default:
+							fprintf(stderr, "data type error.\r\n");
+							return ;
+						}
 
-					recv_data->total_len = recv_data->total_len - cmd_msg_len;
-					recv_data->curr_offset = 0;
+						int cmd_msg_len = sizeof(struct jailed_cmd_head) + cmd_head->data_len;
+						if (recv_data->total_len > cmd_msg_len) {
+							memmove(recv_data->data, recv_data->data + cmd_msg_len, recv_data->total_len - cmd_msg_len);
+							recv_data->curr_offset = 0;
+						} 
 
-
+						recv_data->total_len = recv_data->total_len - cmd_msg_len;
+					} else {
+						break;
+					}
+				} else {
+					break;
 				}
 			}
 		}
@@ -251,11 +289,27 @@ int run_server(int port)
 	struct sockaddr_in server_addr;
 	struct sockaddr_in client_addr;
 	int pid;
+	int on = 1;
 
 	server = socket(PF_INET, SOCK_STREAM, 0);
 	if (server < 0) {
 		fprintf(stderr, "create socket failed, %s\n", strerror(errno));
 		return 1;
+	}
+
+	if (setsockopt(server, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) != 0) {
+		fprintf(stderr, "setsockopt socket opt SO_REUSEADDR failed, %s", strerror(errno));
+		goto errout;
+	}
+
+	if (setsockopt(server, SOL_SOCKET, SO_KEEPALIVE, &on, sizeof(on)) != 0) {
+		fprintf(stderr, "setsockopt socket opt SO_KEEPALIVE failed, %s", strerror(errno));
+		goto errout;
+	}
+
+	if (fcntl(server, F_SETFD, fcntl(server, F_GETFD) | FD_CLOEXEC) != 0) {
+		fprintf(stderr, "setsockopt socket opt FD_CLOEXEC failed, %s", strerror(errno));
+		goto errout;
 	}
 
 	bzero((char *) &server_addr, sizeof(server_addr));
@@ -278,6 +332,8 @@ int run_server(int port)
 			fprintf(stderr, "accept connection failed, %s\n", strerror(errno));
 			continue;
 		}
+
+		fcntl(sock, F_SETFD, fcntl(sock, F_GETFD) | FD_CLOEXEC);
 
 		pid = fork();
 		if (pid == 0) {
@@ -328,6 +384,8 @@ int main(int argc, char *argv[])
 	if (create_pid_file(PID_FILE_PATH) != 0) {
 		//return 1;	
 	}
+
+	signal(SIGCHLD, SIG_IGN);
 
 	return run_server(9999);
 }

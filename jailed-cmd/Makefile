@@ -4,6 +4,7 @@ JAILED_CMD_OBJS=jailed-cmd.o $(JAILED_COMMON_OBJS)
 JAILED_CMDD_OBJS=jailed-cmdd.o $(JAILED_COMMON_OBJS)
 JAILED_CMD=jailed-cmd
 JAILED_CMDD=jailed-cmdd
+JAILED_CMDD_LIB =  -lutil
 
 CFLAGS +=-g  -Werror -Wall -Wstrict-prototypes -fno-omit-frame-pointer -Wstrict-aliasing 
 CXXFLAGS +=-Wall -fno-omit-frame-pointer -Wstrict-aliasing
@@ -16,7 +17,7 @@ $(JAILED_CMD) : $(JAILED_CMD_OBJS)
 	$(CC) $(CFLAGS) $^ -o $@
 
 $(JAILED_CMDD) : $(JAILED_CMDD_OBJS)
-	$(CC) $(CFLAGS) $^ -o $@
+	$(CC) $(CFLAGS) $^ -o $@ $(JAILED_CMDD_LIB)
 
 
 clean:
