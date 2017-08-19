@@ -14,16 +14,24 @@
 #include <unistd.h>
 #include <errno.h>
 #include <signal.h>
+#include <sys/wait.h>
 #include <pty.h>
 #include <sys/stat.h>
+#include <sys/signalfd.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <libgen.h>
 
 #define TMP_BUFF_LEN_32 32
-#define SOCKET_BUFF_LEN (1024 * 1)
+#define SOCKET_BUFF_LEN (1024 * 32)
 
 #define MSG_MAGIC 0x615461446C49614A /* JaIlDaTa */
+
+#define max(x, y) ({				\
+	typeof(x) _max1 = (x);			\
+	typeof(y) _max2 = (y);			\
+	(void) (&_max1 == &_max2);		\
+	_max1 > _max2 ? _max1 : _max2; })
 
 enum CMD_MSG_TYPE {
 	CMD_MSG_CMD        = 1,
@@ -58,7 +66,7 @@ struct jailed_cmd_data {
 };
 
 struct jailed_cmd_exit {
-	unsigned int exit_code;
+	int exit_code;
 };
 
 struct jailed_cmd_winsize {

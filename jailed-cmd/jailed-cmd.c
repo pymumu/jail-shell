@@ -65,7 +65,7 @@ int init_cmd(struct sock_data *send_data, int argc, char *argv[])
 		}
 		
 		if (ioctl(STDIN_FILENO, TIOCGWINSZ, &cmd->ws) != 0) {
-			fprintf(stderr, "get console win size failed, %s", strerror(errno));
+			fprintf(stderr, "get console win size failed, %s\r\n", strerror(errno));
 			return 1;
 		}
 	}
@@ -89,7 +89,7 @@ int cmd_loop(int sock, struct sock_data *send_data, struct sock_data *recv_data)
 	fd_set wfds;
 	fd_set wfds_set;
 	int len;
-	int prog_exit = 0;
+	int prog_exit = 1;
 	int istty = isatty(STDIN_FILENO);
 	int retval;
 	int is_stdin_eof = 0;
@@ -110,7 +110,7 @@ int cmd_loop(int sock, struct sock_data *send_data, struct sock_data *recv_data)
 			cmd_head->type = CMD_MSG_WINSIZE;
 			if (ioctl(STDIN_FILENO, TIOCGWINSZ, &cmd_winsize->ws) != 0) {
 				fprintf(stderr, "get console win size failed, %s", strerror(errno));
-				return 1;
+				goto errout;
 			}	
 			cmd_head->data_len = sizeof(*cmd_winsize);
 			send_data->total_len = sizeof(*cmd_head) + cmd_head->data_len;
@@ -129,7 +129,7 @@ int cmd_loop(int sock, struct sock_data *send_data, struct sock_data *recv_data)
 				continue;
 			}
 			fprintf(stderr, "select fd failed, %s\r\n", strerror(errno));
-			return 1;
+			goto errout;
 		} else if (retval == 0) {
 			continue;
 		} 
@@ -138,7 +138,7 @@ int cmd_loop(int sock, struct sock_data *send_data, struct sock_data *recv_data)
 			len = send(sock, send_data->data + send_data->curr_offset, send_data->total_len - send_data->curr_offset, MSG_NOSIGNAL | MSG_DONTWAIT);
 			if (len < 0) {
 				fprintf(stderr, "socket send failed,  %s\r\n", strerror(errno));
-				return 1;
+				goto errout;
 			} 
 
 			send_data->curr_offset += len;
@@ -152,7 +152,7 @@ int cmd_loop(int sock, struct sock_data *send_data, struct sock_data *recv_data)
 				send_data->curr_offset = 0;
 			} else if (send_data->curr_offset > send_data->total_len) {
 				fprintf(stderr, "BUG: internal error, data length mismach\r\n");
-				return 1;
+				goto errout;
 			} else {
 				memmove(send_data->data, send_data + send_data->curr_offset, send_data->total_len - send_data->curr_offset);
 				send_data->total_len = send_data->total_len - send_data->curr_offset;
@@ -175,20 +175,25 @@ int cmd_loop(int sock, struct sock_data *send_data, struct sock_data *recv_data)
 			if (len < 0) {
 				FD_CLR(0, &rfds);
 				fprintf(stderr, "read mirror failed, %s\r\n", strerror(errno));
-				return 1;
+				goto errout;
 			} 
 
 			cmd_head->data_len = len + sizeof(*cmd_data);;
 			send_data->total_len += sizeof(*cmd_head) + cmd_head->data_len;
-
-			if (len == 0 || (istty && len == 1 && cmd_data->data[0] == '\35')) {
+			if (len == 0) {
 				FD_CLR(0, &rfds);
-				is_stdin_eof = !len;
-				struct jailed_cmd_head *cmd_head_send = (struct jailed_cmd_head *)(send_data->data + send_data->total_len);
+				shutdown(sock, SHUT_WR);
+				continue;
+			}
+
+			if (istty && len == 1 && cmd_data->data[0] == '\35') {
+				FD_CLR(0, &rfds);
+				is_stdin_eof = 1;
+				struct jailed_cmd_head *cmd_head_send = (struct jailed_cmd_head *)(send_data->data);
 				cmd_head_send->magic = MSG_MAGIC;
 				cmd_head_send->type = CMD_MSG_DATA_EXIT;
 				cmd_head_send->data_len = 0;
-				send_data->total_len += sizeof(*cmd_head_send) + cmd_head->data_len;
+				send_data->total_len = sizeof(*cmd_head_send) + cmd_head_send->data_len;
 			}
 
 			FD_SET(sock, &wfds);
@@ -198,10 +203,10 @@ int cmd_loop(int sock, struct sock_data *send_data, struct sock_data *recv_data)
 			len = recv(sock, recv_data->data + recv_data->total_len, sizeof(recv_data->data) - recv_data->total_len, MSG_DONTWAIT);	
 			if (len < 0) {
 				fprintf(stderr, "recv from socket failed, %s\r\n", strerror(errno));
-				return 1;
+				goto errout;
 			} else if (len == 0) {
-				//TODO exit with error code.
-				return 0;
+				FD_CLR(sock, &rfds);
+				goto out;
 			}
 
 			recv_data->total_len += len;
@@ -209,34 +214,29 @@ int cmd_loop(int sock, struct sock_data *send_data, struct sock_data *recv_data)
 				if (recv_data->total_len >= sizeof(struct jailed_cmd_head)) {
 					struct jailed_cmd_head *cmd_head = (struct jailed_cmd_head *)recv_data->data;
 					if (cmd_head->magic != MSG_MAGIC || cmd_head->data_len > sizeof(recv_data->data) - sizeof(struct jailed_cmd_head)) {
-						fprintf(stderr, "Data invalid, magic%llX:%llX, len=%d:%d.\n", 
+						fprintf(stderr, "Data invalid, magic:%llX:%llX, len=%d:%d.\n", 
 								cmd_head->magic, MSG_MAGIC, cmd_head->data_len, sizeof(recv_data));
-						return 1;
+						goto errout;
 					}
 
 					if (recv_data->total_len >= sizeof(struct jailed_cmd_head) + cmd_head->data_len) {
 						switch (cmd_head->type) {
-						case CMD_MSG_DATA_OUT:
-						{
+						case CMD_MSG_DATA_OUT: {
 							struct jailed_cmd_data *cmd_data = (struct jailed_cmd_data *)cmd_head->data;
 							write(STDOUT_FILENO, cmd_data->data, cmd_head->data_len);
-							break;
-						}
-						case CMD_MSG_DATA_ERR:
-						{
+							break; }
+						case CMD_MSG_DATA_ERR: {
 							struct jailed_cmd_data *cmd_data = (struct jailed_cmd_data *)cmd_head->data;
 							write(STDOUT_FILENO, cmd_data->data, cmd_head->data_len);
-							break;
-						}
-						case CMD_MSG_EXIT_CODE:
-						{
+							break; }
+						case CMD_MSG_EXIT_CODE: {
 							struct jailed_cmd_exit *cmd_exit = (struct jailed_cmd_exit *)cmd_head->data;
 							prog_exit = cmd_exit->exit_code;
-							break;
-						}
+							goto out;
+							break; }
 						default:
 							fprintf(stderr, "data type error.\r\n");
-							return 1;
+							goto errout;
 						}
 
 						int cmd_msg_len = sizeof(struct jailed_cmd_head) + cmd_head->data_len;
@@ -256,8 +256,11 @@ int cmd_loop(int sock, struct sock_data *send_data, struct sock_data *recv_data)
 		}
 	}
 
-
+out:
 	return prog_exit;
+
+errout:
+	return 1;
 }
 
 int run_cmd(int argc, char * argv[], int port)
@@ -335,7 +338,9 @@ void signal_handler(int sig)
 {
 	switch(sig) {
 	case SIGWINCH: 
-		window_size_changed = 1;
+		if (isatty(STDIN_FILENO)) {
+			window_size_changed = 1;
+		}
 		return;
 		break;
 	}
