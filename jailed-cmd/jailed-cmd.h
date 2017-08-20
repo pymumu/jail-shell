@@ -1,6 +1,6 @@
 
-#ifndef _JAILED_COMMON_
-#define _JAILED_COMMON_
+#ifndef _JAILED_CMD_
+#define _JAILED_CMD_
 
 #include <stdio.h>
 #include <string.h>
@@ -33,7 +33,7 @@
 	(void) (&_max1 == &_max2);		\
 	_max1 > _max2 ? _max1 : _max2; })
 
-enum CMD_MSG_TYPE {
+typedef enum CMD_MSG_TYPE {
 	CMD_MSG_CMD        = 1,
 	CMD_MSG_DATA_IN    = 2,
 	CMD_MSG_DATA_OUT   = 3,
@@ -41,8 +41,15 @@ enum CMD_MSG_TYPE {
 	CMD_MSG_DATA_EXIT  = 5,
 	CMD_MSG_EXIT_CODE  = 6,
 	CMD_MSG_WINSIZE    = 7,
-	CMD_BUTT = 255
-};
+	CMD_MSG_BUTT = 255
+}CMD_MSG_TYPE;
+
+typedef enum CMD_RETURN {
+	CMD_RETURN_OK      = 0,
+	CMD_RETURN_EXIT    = 1,
+	CMD_RETURN_ERR     = 2,
+	CMD_RETURN_BUTT    =255
+}CMD_RETURN;
 
 struct jailed_cmd_head {
 	unsigned long long magic;

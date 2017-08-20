@@ -1,9 +1,28 @@
-#include "jailed-common.h"
+#include "jailed-cmd.h"
 #include <pty.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 
 #define PID_FILE_PATH "/var/run/jailed-cmdd.pid"
+struct cmdd_context {
+	int sock;
+	int mirror;
+	int mirror_err;
+	int maxfd;
+	
+	fd_set rfds;
+	fd_set wfds;
+
+	int isatty;
+
+	int is_mirror_eof;
+	int is_mirror_err_eof;
+
+	int child_pid;
+
+	struct sock_data send_data;
+	struct sock_data recv_data;
+};
 
 void help(void)
 {
@@ -138,237 +157,346 @@ int start_process(struct jailed_cmd_cmd *cmd_cmd, int *mirror, int *mirror_err)
 	return pid;
 }
 
-void server_loop(int sock, struct sock_data *send_data, struct sock_data *recv_data)
+
+CMD_RETURN process_msg(struct cmdd_context *context, struct jailed_cmd_head *cmd_head) 
 {
-	fd_set rfds;
-	fd_set rfds_set;
-	fd_set wfds;
-	fd_set wfds_set;
+	switch (cmd_head->type) {
+	case CMD_MSG_CMD: {
+		struct jailed_cmd_cmd *cmd_cmd = (struct jailed_cmd_cmd *)cmd_head->data;
+		context->child_pid = start_process(cmd_cmd, &context->mirror, &context->mirror_err);
+		context->isatty = cmd_cmd->isatty;
+
+		FD_SET(context->mirror, &context->rfds);
+		if (context->mirror_err > 0) {
+			FD_SET(context->mirror_err, &context->rfds);
+		}
+
+		context->maxfd = max(context->maxfd, context->mirror);
+		context->maxfd = max(context->maxfd, context->mirror_err);
+		break; }
+	case CMD_MSG_DATA_IN: {
+		struct jailed_cmd_data *cmd_data = (struct jailed_cmd_data *)cmd_head->data;
+		if (context->mirror < 0) {
+			break;
+		}
+		write(context->mirror, cmd_data->data, cmd_head->data_len);
+		break; }
+	case CMD_MSG_DATA_EXIT: {
+		FD_CLR(context->mirror, &context->rfds);
+		close(context->mirror);
+		context->mirror = -1;
+		return CMD_RETURN_EXIT;
+		break; }
+	case CMD_MSG_WINSIZE: {
+		struct jailed_cmd_winsize *cmd_winsize = (struct jailed_cmd_winsize *)cmd_head->data;
+		ioctl(context->mirror, TIOCSWINSZ, &cmd_winsize->ws);
+		break; }
+	default:
+		fprintf(stderr, "data type error.\r\n");
+		return CMD_RETURN_EXIT;
+	}
+
+	return CMD_RETURN_OK;
+}
+
+CMD_RETURN send_sock(struct cmdd_context *context) 
+{
+	int len;
+
+	len = send(context->sock, 
+			context->send_data.data + context->send_data.curr_offset, 
+			context->send_data.total_len - context->send_data.curr_offset, MSG_NOSIGNAL | MSG_DONTWAIT);
+	if (len < 0) {
+		fprintf(stderr, "socket send failed,  %s\n", strerror(errno));
+		return CMD_RETURN_ERR;
+	} 
+
+	context->send_data.curr_offset += len;
+	
+	if (context->send_data.curr_offset == context->send_data.total_len) {
+		FD_CLR(context->sock, &context->wfds);
+		if (context->is_mirror_eof == 0) {
+			FD_SET(context->mirror, &context->rfds);
+		}
+
+		if (context->is_mirror_err_eof == 0) {
+			FD_SET(context->mirror_err, &context->rfds);
+		}
+
+		context->send_data.total_len = 0;
+		context->send_data.curr_offset = 0;
+	} else if (context->send_data.curr_offset > context->send_data.total_len) {
+		fprintf(stderr, "BUG: internal error, data length mismach\n");
+		return CMD_RETURN_ERR;
+	} else {
+		memmove(context->send_data.data, context->send_data.data + context->send_data.curr_offset, 
+				context->send_data.total_len - context->send_data.curr_offset);
+		context->send_data.total_len =  context->send_data.total_len - context->send_data.curr_offset;
+		context->send_data.curr_offset = 0;
+	}
+
+	return CMD_RETURN_OK;
+}
+
+CMD_RETURN recv_sock(struct cmdd_context *context) 
+{
+	int len;
+	CMD_RETURN retval;
+
+	len = recv(context->sock, context->recv_data.data + context->recv_data.total_len, sizeof(context->recv_data.data) - context->recv_data.total_len, MSG_DONTWAIT);	
+	if (len < 0) {
+		fprintf(stderr, "recv from socket failed, %s\n", strerror(errno));
+		return CMD_RETURN_ERR;
+	} else if (len == 0) {
+		FD_CLR(context->sock, &context->rfds);
+		shutdown(context->sock, SHUT_RD);
+		if (context->isatty) {
+			close(context->mirror);
+			context->mirror = -1;
+			if (context->mirror_err > 0) {
+				close(context->mirror_err);
+				context->mirror_err = -1;
+			}
+		} else {
+			shutdown(context->mirror, SHUT_WR);
+			if (context->mirror_err > 0) {
+				shutdown(context->mirror_err, SHUT_WR);
+			}
+		}
+		return CMD_RETURN_OK;
+	}
+
+	context->recv_data.total_len += len;
+	while (1) {
+		if (context->recv_data.total_len < sizeof(struct jailed_cmd_head)) {
+			break;
+		}
+
+		struct jailed_cmd_head *cmd_head = (struct jailed_cmd_head *)context->recv_data.data;
+		if (cmd_head->magic != MSG_MAGIC || cmd_head->data_len > sizeof(context->recv_data.data) - sizeof(struct jailed_cmd_head)) {
+			fprintf(stderr, "Data invalid, magic=%llX:%llX, len=%d:%d.\n", 
+					cmd_head->magic, MSG_MAGIC, cmd_head->data_len, sizeof(context->recv_data));
+			return CMD_RETURN_ERR;
+		}
+
+		if (context->recv_data.total_len < sizeof(struct jailed_cmd_head) + cmd_head->data_len) {
+			break;
+		}
+
+		retval = process_msg(context, cmd_head);
+		if (retval != CMD_RETURN_OK) {
+			return retval;
+		}
+
+		int cmd_msg_len = sizeof(struct jailed_cmd_head) + cmd_head->data_len;
+		if (context->recv_data.total_len > cmd_msg_len) {
+			memmove(context->recv_data.data, context->recv_data.data + cmd_msg_len, context->recv_data.total_len - cmd_msg_len);
+			context->recv_data.curr_offset = 0;
+		} 
+
+		context->recv_data.total_len -= cmd_msg_len;
+	}
+
+	return CMD_RETURN_OK;
+}
+
+CMD_RETURN read_mirror_err(struct cmdd_context *context) 
+{
+	struct jailed_cmd_head *cmd_head;
+	struct jailed_cmd_data *cmd_data;
 
 	int len;
-	int retval;
-	int mirror = -1;
-	int mirror_err = -1;
-	int is_mirror_eof = 0;
-	int is_mirror_err_eof = 0;
-	int maxfd = 0;
-	int child_pid = -1;
+	int free_buff_size;
+	int need_size;
 
-	FD_ZERO(&rfds);
-	FD_ZERO(&wfds);
+	free_buff_size = sizeof(context->send_data.data)  - context->send_data.total_len;
+	need_size = sizeof(struct jailed_cmd_head) + sizeof(struct jailed_cmd_data) + 16;
+	if ((free_buff_size - need_size) < 0) {
+		FD_CLR(context->mirror_err, &context->rfds);
+		return CMD_RETURN_OK;
+	}
+	
+	cmd_head = (struct jailed_cmd_head *)(context->send_data.data + context->send_data.total_len);
+	cmd_data = (struct jailed_cmd_data *)cmd_head->data;
+	cmd_head->magic = MSG_MAGIC;
+	cmd_head->type = CMD_MSG_DATA_ERR;
+	len = read(context->mirror_err, cmd_data->data, free_buff_size - sizeof(struct jailed_cmd_head) - sizeof(struct jailed_cmd_data));
+	if (len < 0) {
+		fprintf(stderr, "read mirror_err failed, %s\n", strerror(errno));
+		FD_CLR(context->mirror_err, &context->rfds);
+		context->is_mirror_err_eof = 1;
+		return CMD_RETURN_OK;
+	} 
 
-	FD_SET(sock, &rfds);
-	maxfd = max(sock, maxfd);
+	cmd_head->data_len = len + sizeof(*cmd_data);
+	context->send_data.total_len += sizeof(*cmd_head) + cmd_head->data_len;
+
+	if (len == 0 ) {
+		FD_CLR(context->mirror_err, &context->rfds);
+		context->is_mirror_err_eof = 1;
+		return CMD_RETURN_OK;
+	}
+
+	FD_SET(context->sock, &context->wfds);
+
+	return CMD_RETURN_OK;
+}
+
+CMD_RETURN read_mirror(struct cmdd_context *context)
+{
+	struct jailed_cmd_head *cmd_head;
+	struct jailed_cmd_data *cmd_data;
+
+	int len;
+	int free_buff_size;
+	int need_size;
+
+	free_buff_size = sizeof(context->send_data.data)  - context->send_data.total_len;
+	need_size = sizeof(struct jailed_cmd_head) + sizeof(struct jailed_cmd_data) + 16;
+	if ((free_buff_size - need_size) < 0) {
+		FD_CLR(context->mirror, &context->rfds);
+		return CMD_RETURN_OK;
+	}
+	
+	cmd_head = (struct jailed_cmd_head *)(context->send_data.data + context->send_data.total_len);
+	cmd_data = (struct jailed_cmd_data *)cmd_head->data;
+	cmd_head->magic = MSG_MAGIC;
+	cmd_head->type = CMD_MSG_DATA_OUT;
+	len = read(context->mirror, cmd_data->data, free_buff_size - sizeof(struct jailed_cmd_head) - sizeof(struct jailed_cmd_data));
+	if (len < 0) {
+		CMD_RETURN retval;
+		/*  if child process exits normally, return exit coode to peer client. */
+		if (errno == EIO || errno == ECONNRESET) {
+			retval = CMD_RETURN_EXIT;
+		} else {
+			fprintf(stderr, "read mirror failed, %s\n", strerror(errno));
+			retval = CMD_RETURN_ERR;
+		}
+		FD_CLR(context->mirror, &context->rfds);
+		context->is_mirror_eof = 1;
+		return retval;
+	} 
+
+	cmd_head->data_len = len + sizeof(*cmd_data);
+	context->send_data.total_len += sizeof(*cmd_head) + cmd_head->data_len;
+
+	if (len == 0 ) {
+		FD_CLR(context->mirror, &context->rfds);
+		context->is_mirror_eof = 1;
+		return CMD_RETURN_EXIT;
+	}
+
+	FD_SET(context->sock, &context->wfds);
+
+	return CMD_RETURN_OK;
+}
+
+void send_exit_code(struct cmdd_context *context)
+{
+	int status = 0x100;
+
+	if (context->send_data.total_len > 0) {
+		send(context->sock, context->send_data.data + context->send_data.curr_offset, context->send_data.total_len - context->send_data.curr_offset, MSG_NOSIGNAL | MSG_DONTWAIT);
+		context->send_data.total_len = 0;
+		context->send_data.curr_offset = 0;
+	}
+
+	struct jailed_cmd_head *cmd_head = (struct jailed_cmd_head *)(context->send_data.data + context->send_data.total_len);
+	struct jailed_cmd_exit *cmd_exit = (struct jailed_cmd_exit *)cmd_head->data;
+	cmd_head->magic = MSG_MAGIC;
+	cmd_head->type = CMD_MSG_EXIT_CODE;
+	cmd_head->data_len = sizeof(*cmd_exit);
+	context->send_data.total_len += sizeof(*cmd_head) + cmd_head->data_len;
+
+	if (waitpid(context->child_pid, &status, 0) < 0) {
+		fprintf(stderr, "wait pid failed.\n");
+	}
+
+	cmd_exit->exit_code = WEXITSTATUS(status);
+
+	send(context->sock, context->send_data.data + context->send_data.curr_offset, context->send_data.total_len - context->send_data.curr_offset, MSG_NOSIGNAL | MSG_DONTWAIT);
+}
+
+void server_loop(struct cmdd_context *context)
+{
+	fd_set rfds_set;
+	fd_set wfds_set;
+
+	CMD_RETURN retval;
+	int select_ret = 0;
+
+	context->mirror = -1;
+	context->mirror_err = -1;
+	FD_ZERO(&context->rfds);
+	FD_ZERO(&context->wfds);
+
+	FD_SET(context->sock, &context->rfds);
+	context->maxfd = max(context->sock, context->maxfd);
 	
 	while (1) {
 
-		rfds_set = rfds;
-		wfds_set = wfds;
+		rfds_set = context->rfds;
+		wfds_set = context->wfds;
 
-		retval = select(maxfd + 1, &rfds_set, &wfds_set, NULL, NULL);
-		if (retval < 0) {
+		select_ret = select(context->maxfd + 1, &rfds_set, &wfds_set, NULL, NULL);
+		if (select_ret < 0) {
 			if (errno == EINTR) {
 				continue;
 			}
 			fprintf(stderr, "select fd failed, %s\r\n", strerror(errno));
-			return ;
-		} else if (retval == 0) {
+			goto out;
+		} else if (select_ret == 0) {
 			continue;
-		} 
+		}
 
-		if (FD_ISSET(sock, &wfds_set)) {
-			len = send(sock, send_data->data + send_data->curr_offset, send_data->total_len - send_data->curr_offset, MSG_NOSIGNAL | MSG_DONTWAIT);
-			if (len < 0) {
-				fprintf(stderr, "socket send failed,  %s\n", strerror(errno));
+		if (FD_ISSET(context->sock, &rfds_set)) {
+			retval = recv_sock(context);
+			if (retval == CMD_RETURN_EXIT) {
 				goto out;
-			} 
+			} else if (retval == CMD_RETURN_ERR) {
+				goto errout;
+			}
+		}
 
-			send_data->curr_offset += len;
-			
-			if (send_data->curr_offset == send_data->total_len) {
-				FD_CLR(sock, &wfds);
-				if (is_mirror_eof == 0) {
-					FD_SET(mirror, &rfds);
-				}
-
-				if (is_mirror_err_eof == 0) {
-					FD_SET(mirror_err, &rfds);
-				}
-
-				send_data->total_len = 0;
-				send_data->curr_offset = 0;
-			} else if (send_data->curr_offset > send_data->total_len) {
-				fprintf(stderr, "BUG: internal error, data length mismach\n");
+		if (FD_ISSET(context->sock, &wfds_set)) {
+			retval = send_sock(context);
+			if (retval == CMD_RETURN_EXIT) {
 				goto out;
-			} else {
-				memmove(send_data->data, send_data + send_data->curr_offset, send_data->total_len - send_data->curr_offset);
-				send_data->total_len =  send_data->total_len - send_data->curr_offset;
-				send_data->curr_offset = 0;
+			} else if (retval == CMD_RETURN_ERR) {
+				goto errout;
 			}
 		}
 
-
-		if (FD_ISSET(mirror, &rfds_set)) {
-			int free_buff_size = sizeof(send_data->data)  - send_data->total_len;
-			int need_size = sizeof(struct jailed_cmd_head) + sizeof(struct jailed_cmd_data) + 16;
-			if ((free_buff_size - need_size) < 0) {
-				FD_CLR(mirror, &rfds);
-				continue;
-			}
-			struct jailed_cmd_head *cmd_head = (struct jailed_cmd_head *)(send_data->data + send_data->total_len);
-			struct jailed_cmd_data *cmd_data = (struct jailed_cmd_data *)cmd_head->data;
-			cmd_head->magic = MSG_MAGIC;
-			cmd_head->type = CMD_MSG_DATA_OUT;
-			len = read(mirror, cmd_data->data, free_buff_size - sizeof(struct jailed_cmd_head) - sizeof(struct jailed_cmd_data));
-			if (len < 0) {
-				fprintf(stderr, "read mirror failed, %s\n", strerror(errno));
-				FD_CLR(mirror, &rfds);
-				is_mirror_eof = !len;
-				break;
-			} 
-
-			cmd_head->data_len = len + sizeof(*cmd_data);
-			send_data->total_len += sizeof(*cmd_head) + cmd_head->data_len;
-
-			if (len == 0 ) {
-				FD_CLR(mirror, &rfds);
-				is_mirror_eof = !len;
-				break;
-			}
-
-			FD_SET(sock, &wfds);
-		}
-
-		if (mirror_err > 0 && FD_ISSET(mirror_err, &rfds_set)) {
-			int free_buff_size = sizeof(send_data->data)  - send_data->total_len;
-			int need_size = sizeof(struct jailed_cmd_head) + sizeof(struct jailed_cmd_data) + 16;
-			if ((free_buff_size - need_size) < 0) {
-				FD_CLR(mirror_err, &rfds);
-				continue;
-			}
-			struct jailed_cmd_head *cmd_head = (struct jailed_cmd_head *)(send_data->data + send_data->total_len);
-			struct jailed_cmd_data *cmd_data = (struct jailed_cmd_data *)cmd_head->data;
-			cmd_head->magic = MSG_MAGIC;
-			cmd_head->type = CMD_MSG_DATA_ERR;
-			len = read(mirror_err, cmd_data->data, free_buff_size - sizeof(struct jailed_cmd_head) - sizeof(struct jailed_cmd_data));
-			if (len < 0) {
-				fprintf(stderr, "read mirror failed, %s\n", strerror(errno));
-				FD_CLR(mirror_err, &rfds);
-				is_mirror_err_eof = !len;
-				continue;
-			} 
-
-			cmd_head->data_len = len + sizeof(*cmd_data);
-			send_data->total_len += sizeof(*cmd_head) + cmd_head->data_len;
-
-			if (len == 0 ) {
-				FD_CLR(mirror_err, &rfds);
-				is_mirror_err_eof = !len;
-				continue;
-			}
-
-			FD_SET(sock, &wfds);
-		}
-
-		if (FD_ISSET(sock, &rfds_set)) {
-			len = recv(sock, recv_data->data + recv_data->total_len, sizeof(recv_data->data) - recv_data->total_len, MSG_DONTWAIT);	
-			if (len < 0) {
-				fprintf(stderr, "recv from socket failed, %s\n", strerror(errno));
-				return ;
-			} else if (len == 0) {
-				FD_CLR(sock, &rfds);
-				shutdown(sock, SHUT_RD);
-				shutdown(mirror, SHUT_WR);
-				if (mirror_err > 0) {
-					shutdown(mirror_err, SHUT_WR);
-				}
-				continue;
-			}
-
-			recv_data->total_len += len;
-			while (1) {
-				if (recv_data->total_len >= sizeof(struct jailed_cmd_head)) {
-					struct jailed_cmd_head *cmd_head = (struct jailed_cmd_head *)recv_data->data;
-					if (cmd_head->magic != MSG_MAGIC || cmd_head->data_len > sizeof(recv_data->data) - sizeof(struct jailed_cmd_head)) {
-						fprintf(stderr, "Data invalid, magic=%llX:%llX, len=%d:%d.\n", 
-								cmd_head->magic, MSG_MAGIC, cmd_head->data_len, sizeof(recv_data));
-						goto out;
-					}
-
-					if (recv_data->total_len >= sizeof(struct jailed_cmd_head) + cmd_head->data_len) {
-						switch (cmd_head->type) {
-						case CMD_MSG_CMD: {
-							struct jailed_cmd_cmd *cmd_cmd = (struct jailed_cmd_cmd *)cmd_head->data;
-							child_pid = start_process(cmd_cmd, &mirror, &mirror_err);
-							FD_SET(mirror, &rfds);
-							if (mirror_err > 0) {
-								FD_SET(mirror_err, &rfds);
-							}
-							maxfd = max(maxfd, mirror);
-							maxfd = max(maxfd, mirror_err);
-							break; }
-						case CMD_MSG_DATA_IN: {
-							struct jailed_cmd_data *cmd_data = (struct jailed_cmd_data *)cmd_head->data;
-							if (mirror < 0) {
-								break;
-							}
-							write(mirror, cmd_data->data, cmd_head->data_len);
-							break; }
-						case CMD_MSG_DATA_EXIT: {
-							goto out;
-							break; }
-						case CMD_MSG_WINSIZE: {
-							struct jailed_cmd_winsize *cmd_winsize = (struct jailed_cmd_winsize *)cmd_head->data;
-							ioctl(mirror, TIOCSWINSZ, &cmd_winsize->ws);
-							break; }
-						default:
-							fprintf(stderr, "data type error.\r\n");
-							goto out;
-						}
-
-						int cmd_msg_len = sizeof(struct jailed_cmd_head) + cmd_head->data_len;
-						if (recv_data->total_len > cmd_msg_len) {
-							memmove(recv_data->data, recv_data->data + cmd_msg_len, recv_data->total_len - cmd_msg_len);
-							recv_data->curr_offset = 0;
-						} 
-
-						recv_data->total_len = recv_data->total_len - cmd_msg_len;
-					} else {
-						break;
-					}
-				} else {
-					break;
-				}
+		if (context->mirror_err > 0 && FD_ISSET(context->mirror_err, &rfds_set)) {
+			retval = read_mirror_err(context);
+			if (retval == CMD_RETURN_EXIT) {
+				goto out;
+			} else if (retval == CMD_RETURN_ERR) {
+				goto errout;
 			}
 		}
+
+		if (FD_ISSET(context->mirror, &rfds_set)) {
+			retval = read_mirror(context);
+			if (retval == CMD_RETURN_EXIT) {
+				goto out;
+			} else if (retval == CMD_RETURN_ERR) {
+				goto errout;
+			}
+		}
+
 	}
-
-	if (send_data->total_len > 0) {
-		send(sock, send_data->data + send_data->curr_offset, send_data->total_len - send_data->curr_offset, MSG_NOSIGNAL | MSG_DONTWAIT);
-		send_data->total_len = 0;
-		send_data->curr_offset = 0;
-	}
-
-	struct jailed_cmd_head *cmd_head = (struct jailed_cmd_head *)(send_data->data + send_data->total_len);
-	struct jailed_cmd_exit *cmd_exit = (struct jailed_cmd_exit *)cmd_head->data;
-	cmd_head->magic = MSG_MAGIC;
-	cmd_head->type = CMD_MSG_EXIT_CODE;
-	cmd_head->data_len = len + sizeof(*cmd_exit);
-	send_data->total_len += sizeof(*cmd_head) + cmd_head->data_len;
-
-	if (waitpid(child_pid, &cmd_exit->exit_code, 0) < 0) {
-		fprintf(stderr, "wait pid failed.\n");
-	}
-
-	send(sock, send_data->data + send_data->curr_offset, send_data->total_len - send_data->curr_offset, MSG_NOSIGNAL | MSG_DONTWAIT);
 
 out:
-	if (mirror) {
-		close(mirror);
+	send_exit_code(context);
+errout:
+
+	if (context->mirror > 0) {
+		close(context->mirror);
 	}
 
-	if (mirror_err > 0) {
-		close(mirror_err);
+	if (context->mirror_err > 0) {
+		close(context->mirror_err);
 	}
 
 	return;
@@ -377,34 +505,22 @@ out:
 
 void serve(int sock) 
 {
-	struct sock_data *send_data ;
-	struct sock_data *recv_data ;
+	struct cmdd_context *context;
 
-	send_data = malloc(sizeof(*send_data));
-	if (send_data == NULL) {
-		fprintf(stderr, "malloc send buffer failed, %s\n", strerror(errno));
+	context = malloc(sizeof(*context));
+	if (context == NULL) {
+		fprintf(stderr, "malloc context failed, %s\n", strerror(errno));
 		goto errout;
 	}
-	memset(send_data, 0, sizeof(*send_data));
-
-	recv_data = malloc(sizeof(*recv_data));
-	if (recv_data == NULL) {
-		fprintf(stderr, "malloc send buffer failed, %s\n", strerror(errno));
-		goto errout;
-	}
-	memset(recv_data, 0, sizeof(*recv_data));
+	memset(context, 0, sizeof(*context));
+	context->sock = sock;
 
 	signal(SIGCHLD, SIG_DFL);
-
-	server_loop(sock, send_data, recv_data);
+	server_loop(context);
 	
 errout:
-	if (recv_data) {
-		free(recv_data);
-	}
-
-	if (send_data) {
-		free(send_data);
+	if (context) {
+		free(context);
 	}
 }
 

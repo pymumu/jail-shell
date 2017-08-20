@@ -1,4 +1,4 @@
-#include "jailed-common.h"
+#include "jailed-cmd.h"
 
 void set_sock_buff_size(int sockfd) 
 {
