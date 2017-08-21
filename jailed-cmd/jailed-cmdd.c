@@ -241,6 +241,7 @@ CMD_RETURN send_sock(struct cmdd_context *context)
 CMD_RETURN recv_sock(struct cmdd_context *context) 
 {
 	int len;
+	struct jailed_cmd_head *cmd_head;
 	CMD_RETURN retval;
 
 	len = recv(context->sock, context->recv_data.data + context->recv_data.total_len, sizeof(context->recv_data.data) - context->recv_data.total_len, MSG_DONTWAIT);	
@@ -268,18 +269,17 @@ CMD_RETURN recv_sock(struct cmdd_context *context)
 
 	context->recv_data.total_len += len;
 	while (1) {
-		if (context->recv_data.total_len < sizeof(struct jailed_cmd_head)) {
+		if (context->recv_data.total_len - context->recv_data.curr_offset < sizeof(struct jailed_cmd_head)) {
 			break;
 		}
 
-		struct jailed_cmd_head *cmd_head = (struct jailed_cmd_head *)context->recv_data.data;
+		cmd_head = (struct jailed_cmd_head *)(context->recv_data.data + context->recv_data.curr_offset);
 		if (cmd_head->magic != MSG_MAGIC || cmd_head->data_len > sizeof(context->recv_data.data) - sizeof(struct jailed_cmd_head)) {
-			fprintf(stderr, "Data invalid, magic=%llX:%llX, len=%d:%d.\n", 
-					cmd_head->magic, MSG_MAGIC, cmd_head->data_len, sizeof(context->recv_data));
+			fprintf(stderr, "Data invalid\n");
 			return CMD_RETURN_ERR;
 		}
 
-		if (context->recv_data.total_len < sizeof(struct jailed_cmd_head) + cmd_head->data_len) {
+		if (context->recv_data.total_len - context->recv_data.curr_offset < sizeof(struct jailed_cmd_head) + cmd_head->data_len) {
 			break;
 		}
 
@@ -288,13 +288,18 @@ CMD_RETURN recv_sock(struct cmdd_context *context)
 			return retval;
 		}
 
-		int cmd_msg_len = sizeof(struct jailed_cmd_head) + cmd_head->data_len;
-		if (context->recv_data.total_len > cmd_msg_len) {
-			memmove(context->recv_data.data, context->recv_data.data + cmd_msg_len, context->recv_data.total_len - cmd_msg_len);
-			context->recv_data.curr_offset = 0;
-		} 
+		context->recv_data.curr_offset += sizeof(struct jailed_cmd_head) + cmd_head->data_len;
+	}
 
-		context->recv_data.total_len -= cmd_msg_len;
+	if (context->recv_data.total_len > context->recv_data.curr_offset) {
+		memmove(context->recv_data.data, context->recv_data.data + context->recv_data.curr_offset, context->recv_data.total_len - context->recv_data.curr_offset);
+		context->recv_data.total_len -= context->recv_data.curr_offset;
+		context->recv_data.curr_offset = 0;
+	} else if (context->recv_data.total_len == context->recv_data.curr_offset) {
+		context->recv_data.curr_offset = 0;
+		context->recv_data.total_len = 0;
+	} else {
+		fprintf(stderr, "BUG: internal error, data length mismach\r\n");
 	}
 
 	return CMD_RETURN_OK;
@@ -513,6 +518,9 @@ void serve(int sock)
 		goto errout;
 	}
 	memset(context, 0, sizeof(*context));
+
+	set_sock_opt(sock);
+
 	context->sock = sock;
 
 	signal(SIGCHLD, SIG_DFL);

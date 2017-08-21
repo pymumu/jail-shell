@@ -7,6 +7,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/ioctl.h>
@@ -85,6 +86,8 @@ struct sock_data {
 	int curr_offset;
 	char data[SOCKET_BUFF_LEN];
 };
+
+extern void set_sock_opt(int sock);
 
 #endif
 

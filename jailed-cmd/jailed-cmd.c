@@ -124,24 +124,21 @@ CMD_RETURN read_stdin(struct cmd_context *context)
 		FD_CLR(STDIN_FILENO, &context->rfds);
 		fprintf(stderr, "read mirror failed, %s\r\n", strerror(errno));
 		return CMD_RETURN_ERR;
-	} 
+	} else if (len == 0) {
+		FD_CLR(STDIN_FILENO, &context->rfds);
+		context->is_stdin_eof = 1;
+		FD_SET(context->sock, &context->wfds);
+		return CMD_RETURN_OK;
+	}
 
 	cmd_head->data_len = len + sizeof(*cmd_data);;
 	context->send_data.total_len += sizeof(*cmd_head) + cmd_head->data_len;
-	if (len == 0) {
-		FD_CLR(STDIN_FILENO, &context->rfds);
-		shutdown(context->sock, SHUT_WR);
-		return CMD_RETURN_OK;
-	}
 
 	if (context->isatty && len == 1 && cmd_data->data[0] == '\35') {
 		FD_CLR(STDIN_FILENO, &context->rfds);
 		context->is_stdin_eof = 1;
-		struct jailed_cmd_head *cmd_head_send = (struct jailed_cmd_head *)(context->send_data.data);
-		cmd_head_send->magic = MSG_MAGIC;
-		cmd_head_send->type = CMD_MSG_DATA_EXIT;
-		cmd_head_send->data_len = 0;
-		context->send_data.total_len = sizeof(*cmd_head_send) + cmd_head_send->data_len;
+		cmd_head->magic = MSG_MAGIC;
+		cmd_head->type = CMD_MSG_DATA_EXIT;
 	}
 
 	FD_SET(context->sock, &context->wfds);
@@ -182,13 +179,14 @@ CMD_RETURN send_sock(struct cmd_context *context)
 		fprintf(stderr, "socket send failed,  %s\r\n", strerror(errno));
 		return CMD_RETURN_ERR;
 	} 
-
 	context->send_data.curr_offset += len;
 	
 	if (context->send_data.curr_offset == context->send_data.total_len) {
 		FD_CLR(context->sock, &context->wfds);
 		if (context->is_stdin_eof == 0) {
 			FD_SET(STDIN_FILENO, &context->rfds);
+		} else {
+			shutdown(context->sock, SHUT_WR);
 		}
 		context->send_data.total_len = 0;
 		context->send_data.curr_offset = 0;
@@ -221,18 +219,17 @@ CMD_RETURN recv_sock(struct cmd_context *context)
 
 	context->recv_data.total_len += len;
 	while (1) {
-		if (context->recv_data.total_len < sizeof(struct jailed_cmd_head)) {
+		if (context->recv_data.total_len - context->recv_data.curr_offset < sizeof(struct jailed_cmd_head)) {
 			break;
 		}
 
-		cmd_head = (struct jailed_cmd_head *)context->recv_data.data;
+		cmd_head = (struct jailed_cmd_head *)(context->recv_data.data + context->recv_data.curr_offset);
 		if (cmd_head->magic != MSG_MAGIC || cmd_head->data_len > sizeof(context->recv_data.data) - sizeof(struct jailed_cmd_head)) {
-			fprintf(stderr, "Data invalid, magic:%llX:%llX, len=%d:%d.\n", 
-					cmd_head->magic, MSG_MAGIC, cmd_head->data_len, sizeof(context->recv_data));
+			fprintf(stderr, "Data invalid\r\n"); 
 			return CMD_RETURN_ERR;
 		}
 
-		if (context->recv_data.total_len < sizeof(struct jailed_cmd_head) + cmd_head->data_len) {
+		if (context->recv_data.total_len - context->recv_data.curr_offset < sizeof(struct jailed_cmd_head) + cmd_head->data_len) {
 			break;
 		}
 
@@ -241,14 +238,20 @@ CMD_RETURN recv_sock(struct cmd_context *context)
 			return retval;
 		}
 
-		int cmd_msg_len = sizeof(struct jailed_cmd_head) + cmd_head->data_len;
-		if (context->recv_data.total_len > cmd_msg_len) {
-			memmove(context->recv_data.data, context->recv_data.data + cmd_msg_len, context->recv_data.total_len - cmd_msg_len);
-			context->recv_data.curr_offset = 0;
-		} 
-
-		context->recv_data.total_len -= cmd_msg_len;
+		context->recv_data.curr_offset += sizeof(struct jailed_cmd_head) + cmd_head->data_len;
 	}
+
+	if (context->recv_data.total_len > context->recv_data.curr_offset) {
+		memmove(context->recv_data.data, context->recv_data.data + context->recv_data.curr_offset, context->recv_data.total_len - context->recv_data.curr_offset);
+		context->recv_data.total_len -= context->recv_data.curr_offset;
+		context->recv_data.curr_offset = 0;
+	} else if (context->recv_data.total_len == context->recv_data.curr_offset) {
+		context->recv_data.curr_offset = 0;
+		context->recv_data.total_len = 0;
+	} else {
+		fprintf(stderr, "BUG: internal error, data length mismach\r\n");
+	}
+
 
 	return CMD_RETURN_OK;
 }
@@ -262,7 +265,11 @@ int set_win_size(struct cmd_context *context)
 		return 0;
 	}	
 
-	cmd_head = (struct jailed_cmd_head *)context->send_data.data;
+	if (sizeof(context->send_data.data) - context->send_data.total_len < sizeof(struct jailed_cmd_head)) {
+		return 0;
+	}
+
+	cmd_head = (struct jailed_cmd_head *)(context->send_data.data + context->send_data.total_len);
 	cmd_winsize = (struct jailed_cmd_winsize *)cmd_head->data;
 	cmd_head->magic = MSG_MAGIC;
 	cmd_head->type = CMD_MSG_WINSIZE;
@@ -272,8 +279,7 @@ int set_win_size(struct cmd_context *context)
 	}	
 
 	cmd_head->data_len = sizeof(*cmd_winsize);
-	context->send_data.total_len = sizeof(*cmd_head) + cmd_head->data_len;
-	context->send_data.curr_offset = 0;
+	context->send_data.total_len += sizeof(*cmd_head) + cmd_head->data_len;
 
 	window_size_changed = 0;
 	FD_SET(context->sock, &context->wfds);
@@ -385,12 +391,15 @@ int run_cmd(int argc, char * argv[], int port)
 		goto errout;
 	}
 
+	set_sock_opt(client);
+
 	context->sock = client;
 	context->isatty = isatty(STDIN_FILENO);
 	
 	if (context->isatty) {
 		set_term();
 	}
+
 
 	retval = cmd_loop(context);
 
