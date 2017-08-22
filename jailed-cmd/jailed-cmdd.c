@@ -15,6 +15,7 @@ struct cmdd_context {
 
 	int isatty;
 
+	int is_sock_eof;
 	int is_mirror_eof;
 	int is_mirror_err_eof;
 
@@ -22,6 +23,7 @@ struct cmdd_context {
 
 	struct sock_data send_data;
 	struct sock_data recv_data;
+	struct sock_data mirror_data;
 };
 
 void help(void)
@@ -42,6 +44,7 @@ int create_pid_file(const char *pid_file)
 	int flags;
 	char buff[TMP_BUFF_LEN_32];
 
+	/*  create pid file, and lock this file */
 	fd = open(pid_file, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
 	if (fd == -1) {
 		fprintf(stderr, "create pid file failed, %s", strerror(errno));
@@ -80,14 +83,17 @@ errout:
 	return 1;
 }
 
+/*  fork process and create socketpair to stdin, stdout, stderr for data writing and reading */
 int forksocket(int *mirror, int *mirror_err)
 {
 	int fd[2];
 	int fd_err[2];
+	int pid;
 
 	static const int parentsocket = 0;
 	static const int childsocket = 1;
 
+	/*  create socketpair for stdin, stdout, stderr */
 	if (socketpair(PF_LOCAL, SOCK_STREAM, 0, fd) != 0) {
 		return -1;
 	}
@@ -96,14 +102,17 @@ int forksocket(int *mirror, int *mirror_err)
 		return -1;
 	}
 
-	int pid = fork();
-
+	pid = fork();
 	if (pid == 0) {
 		close(fd[parentsocket]);
+		close(fd_err[parentsocket]);
+
+		/*  close original std fd */
 		close(0);
 		close(1);
 		close(2);
 
+		/*  duplicate socket to std fd */
 		dup2(fd[childsocket], 0);
 		dup2(fd[childsocket], 1);
 		dup2(fd_err[childsocket], 2);
@@ -114,6 +123,7 @@ int forksocket(int *mirror, int *mirror_err)
 		return pid;
 	} else if (pid > 0) {
 		close(fd[childsocket]);
+		close(fd_err[childsocket]);
 		*mirror = fd[parentsocket];
 		*mirror_err = fd_err[parentsocket];
 	}
@@ -129,6 +139,7 @@ int start_process(struct jailed_cmd_cmd *cmd_cmd, int *mirror, int *mirror_err)
 	int len = 0;
 	int pid = -1;
 
+	/*  get args to standard parameter: argc, argv[] */
 	for (i = 0; i < cmd_cmd->argc; i++) {
 		argv[i] = cmd_cmd->argvs + len;
 		len += strlen(cmd_cmd->argvs + len) + 1;
@@ -136,12 +147,15 @@ int start_process(struct jailed_cmd_cmd *cmd_cmd, int *mirror, int *mirror_err)
 	argv[i] = 0;
 	
 	if (cmd_cmd->isatty) {
+		/*  if command comes from interactive shell, start a pty term and fork process */
 		pid = forkpty(mirror, NULL, NULL, &cmd_cmd->ws);
 	} else {
+		/*  if command comes from non-interactive shell, make socketpair and fork process */
 		pid = forksocket(mirror, mirror_err);
 	}
 
 	if (pid < 0) {
+		/*  fork failed */
 		return -1;
 	} else if (pid == 0) {
 		close(*mirror);
@@ -150,18 +164,18 @@ int start_process(struct jailed_cmd_cmd *cmd_cmd, int *mirror, int *mirror_err)
 		}
 		setenv("TERM", cmd_cmd->term, 1);
 		execv(argv[0], argv);
-		printf(" : %s\n", strerror(errno));
+		printf("%s : %s\n", argv[0], strerror(errno));
 		_exit(0);
 	} 
 
 	return pid;
 }
 
-
-CMD_RETURN process_msg(struct cmdd_context *context, struct jailed_cmd_head *cmd_head) 
+CMD_RETURN process_cmd(struct cmdd_context *context, struct jailed_cmd_head *cmd_head) 
 {
 	switch (cmd_head->type) {
 	case CMD_MSG_CMD: {
+		/*  init cmd message */
 		struct jailed_cmd_cmd *cmd_cmd = (struct jailed_cmd_cmd *)cmd_head->data;
 		context->child_pid = start_process(cmd_cmd, &context->mirror, &context->mirror_err);
 		context->isatty = cmd_cmd->isatty;
@@ -175,19 +189,33 @@ CMD_RETURN process_msg(struct cmdd_context *context, struct jailed_cmd_head *cmd
 		context->maxfd = max(context->maxfd, context->mirror_err);
 		break; }
 	case CMD_MSG_DATA_IN: {
+		/*  input message  */
 		struct jailed_cmd_data *cmd_data = (struct jailed_cmd_data *)cmd_head->data;
 		if (context->mirror < 0) {
 			break;
 		}
-		write(context->mirror, cmd_data->data, cmd_head->data_len);
+
+		/*  if mirror_data is full, stop write to mirror, and stop read data from client socket */
+		int mirror_free = sizeof(context->mirror_data.data) - context->mirror_data.total_len;
+		if (mirror_free < cmd_head->data_len) {
+			FD_CLR(context->sock, &context->rfds);
+			return CMD_RETURN_CONT;
+		}
+
+		/*  copy read data to mirror_data, and start mirror write event. */
+		memcpy(context->mirror_data.data + context->mirror_data.total_len, cmd_data->data, cmd_head->data_len);
+		context->mirror_data.total_len += cmd_head->data_len;
+		FD_SET(context->mirror, &context->wfds);
 		break; }
 	case CMD_MSG_DATA_EXIT: {
+		/*  exit message  */
 		FD_CLR(context->mirror, &context->rfds);
 		close(context->mirror);
 		context->mirror = -1;
 		return CMD_RETURN_EXIT;
 		break; }
 	case CMD_MSG_WINSIZE: {
+		/*  win size change message */
 		struct jailed_cmd_winsize *cmd_winsize = (struct jailed_cmd_winsize *)cmd_head->data;
 		ioctl(context->mirror, TIOCSWINSZ, &cmd_winsize->ws);
 		break; }
@@ -203,6 +231,7 @@ CMD_RETURN send_sock(struct cmdd_context *context)
 {
 	int len;
 
+	/*  send data to client */
 	len = send(context->sock, 
 			context->send_data.data + context->send_data.curr_offset, 
 			context->send_data.total_len - context->send_data.curr_offset, MSG_NOSIGNAL | MSG_DONTWAIT);
@@ -214,25 +243,77 @@ CMD_RETURN send_sock(struct cmdd_context *context)
 	context->send_data.curr_offset += len;
 	
 	if (context->send_data.curr_offset == context->send_data.total_len) {
+		/*  if all data has been sent, stop send event, and reset buffer length info */
 		FD_CLR(context->sock, &context->wfds);
-		if (context->is_mirror_eof == 0) {
-			FD_SET(context->mirror, &context->rfds);
-		}
-
-		if (context->is_mirror_err_eof == 0) {
-			FD_SET(context->mirror_err, &context->rfds);
-		}
-
 		context->send_data.total_len = 0;
 		context->send_data.curr_offset = 0;
-	} else if (context->send_data.curr_offset > context->send_data.total_len) {
-		fprintf(stderr, "BUG: internal error, data length mismach\n");
-		return CMD_RETURN_ERR;
-	} else {
+	}  else if (context->send_data.curr_offset < context->send_data.total_len) {
+		/*  exists more data, move data to the beggining of the buffer */
 		memmove(context->send_data.data, context->send_data.data + context->send_data.curr_offset, 
 				context->send_data.total_len - context->send_data.curr_offset);
 		context->send_data.total_len =  context->send_data.total_len - context->send_data.curr_offset;
 		context->send_data.curr_offset = 0;
+	} else {
+		fprintf(stderr, "BUG: internal error, data length mismach\n");
+		return CMD_RETURN_ERR;
+	}
+
+	/*  Have enough free buff now, wake up mirror stdout, stderr event, and read. */
+	if (context->is_mirror_eof == 0) {
+		FD_SET(context->mirror, &context->rfds);
+	}
+
+	if (context->is_mirror_err_eof == 0) {
+		FD_SET(context->mirror_err, &context->rfds);
+	}
+
+	return CMD_RETURN_OK;
+}
+
+CMD_RETURN process_msg(struct cmdd_context *context) 
+{
+	struct jailed_cmd_head *cmd_head;
+	CMD_RETURN retval;
+
+	/*  process data which received from client. */
+	while (1) {
+		/*  if data is partial, continue recv */
+		if (context->recv_data.total_len - context->recv_data.curr_offset < sizeof(struct jailed_cmd_head)) {
+			break;
+		}
+
+		cmd_head = (struct jailed_cmd_head *)(context->recv_data.data + context->recv_data.curr_offset);
+		if (cmd_head->magic != MSG_MAGIC || cmd_head->data_len > sizeof(context->recv_data.data) - sizeof(struct jailed_cmd_head)) {
+			/*  if recevied error data, exit. */
+			fprintf(stderr, "Data invalid\n");
+			return CMD_RETURN_ERR;
+		}
+
+		/*  if data is partial, continue recv */
+		if (context->recv_data.total_len - context->recv_data.curr_offset < sizeof(struct jailed_cmd_head) + cmd_head->data_len) {
+			break;
+		}
+
+		retval = process_cmd(context, cmd_head);
+		if (retval != CMD_RETURN_OK) {
+			return retval;
+		}
+
+		context->recv_data.curr_offset += sizeof(struct jailed_cmd_head) + cmd_head->data_len;
+	}
+
+	if (context->recv_data.total_len == context->recv_data.curr_offset) {
+		/*  if all data has been proceed, reset buffer length info */
+		context->recv_data.curr_offset = 0;
+		context->recv_data.total_len = 0;
+	} else if (context->recv_data.total_len > context->recv_data.curr_offset) {
+		/*  exists more data, move data to the beggining of the buffer */
+		memmove(context->recv_data.data, context->recv_data.data + context->recv_data.curr_offset, context->recv_data.total_len - context->recv_data.curr_offset);
+		context->recv_data.total_len -= context->recv_data.curr_offset;
+		context->recv_data.curr_offset = 0;
+	} else {
+		fprintf(stderr, "BUG: internal error, data length mismach\r\n");
+		return CMD_RETURN_ERR;
 	}
 
 	return CMD_RETURN_OK;
@@ -241,80 +322,38 @@ CMD_RETURN send_sock(struct cmdd_context *context)
 CMD_RETURN recv_sock(struct cmdd_context *context) 
 {
 	int len;
-	struct jailed_cmd_head *cmd_head;
-	CMD_RETURN retval;
 
+	/*  recv data from client */
 	len = recv(context->sock, context->recv_data.data + context->recv_data.total_len, sizeof(context->recv_data.data) - context->recv_data.total_len, MSG_DONTWAIT);	
 	if (len < 0) {
 		fprintf(stderr, "recv from socket failed, %s\n", strerror(errno));
 		return CMD_RETURN_ERR;
 	} else if (len == 0) {
+		/*  if peer server closed, then stop recv event. */
 		FD_CLR(context->sock, &context->rfds);
 		shutdown(context->sock, SHUT_RD);
-		if (context->isatty) {
-			close(context->mirror);
-			context->mirror = -1;
-			if (context->mirror_err > 0) {
-				close(context->mirror_err);
-				context->mirror_err = -1;
-			}
-		} else {
-			shutdown(context->mirror, SHUT_WR);
-			if (context->mirror_err > 0) {
-				shutdown(context->mirror_err, SHUT_WR);
-			}
-		}
+		context->is_sock_eof = 1;
+		/*  wake up mirror write event, write remain data to stdin */
+		FD_SET(context->mirror, &context->wfds);
 		return CMD_RETURN_OK;
 	}
 
 	context->recv_data.total_len += len;
-	while (1) {
-		if (context->recv_data.total_len - context->recv_data.curr_offset < sizeof(struct jailed_cmd_head)) {
-			break;
-		}
 
-		cmd_head = (struct jailed_cmd_head *)(context->recv_data.data + context->recv_data.curr_offset);
-		if (cmd_head->magic != MSG_MAGIC || cmd_head->data_len > sizeof(context->recv_data.data) - sizeof(struct jailed_cmd_head)) {
-			fprintf(stderr, "Data invalid\n");
-			return CMD_RETURN_ERR;
-		}
-
-		if (context->recv_data.total_len - context->recv_data.curr_offset < sizeof(struct jailed_cmd_head) + cmd_head->data_len) {
-			break;
-		}
-
-		retval = process_msg(context, cmd_head);
-		if (retval != CMD_RETURN_OK) {
-			return retval;
-		}
-
-		context->recv_data.curr_offset += sizeof(struct jailed_cmd_head) + cmd_head->data_len;
-	}
-
-	if (context->recv_data.total_len > context->recv_data.curr_offset) {
-		memmove(context->recv_data.data, context->recv_data.data + context->recv_data.curr_offset, context->recv_data.total_len - context->recv_data.curr_offset);
-		context->recv_data.total_len -= context->recv_data.curr_offset;
-		context->recv_data.curr_offset = 0;
-	} else if (context->recv_data.total_len == context->recv_data.curr_offset) {
-		context->recv_data.curr_offset = 0;
-		context->recv_data.total_len = 0;
-	} else {
-		fprintf(stderr, "BUG: internal error, data length mismach\r\n");
-	}
-
-	return CMD_RETURN_OK;
+	return process_msg(context);
 }
 
 CMD_RETURN read_mirror_err(struct cmdd_context *context) 
 {
+	int len;
+	int need_size;
+	int free_buff_size;
+
 	struct jailed_cmd_head *cmd_head;
 	struct jailed_cmd_data *cmd_data;
 
-	int len;
-	int free_buff_size;
-	int need_size;
-
 	free_buff_size = sizeof(context->send_data.data)  - context->send_data.total_len;
+	/*  if free space is not enougth, then block reading from stderr */
 	need_size = sizeof(struct jailed_cmd_head) + sizeof(struct jailed_cmd_data) + 16;
 	if ((free_buff_size - need_size) < 0) {
 		FD_CLR(context->mirror_err, &context->rfds);
@@ -331,20 +370,80 @@ CMD_RETURN read_mirror_err(struct cmdd_context *context)
 		FD_CLR(context->mirror_err, &context->rfds);
 		context->is_mirror_err_eof = 1;
 		return CMD_RETURN_OK;
-	} 
-
-	cmd_head->data_len = len + sizeof(*cmd_data);
-	context->send_data.total_len += sizeof(*cmd_head) + cmd_head->data_len;
-
-	if (len == 0 ) {
+	} else if (len == 0 ) {
 		FD_CLR(context->mirror_err, &context->rfds);
 		context->is_mirror_err_eof = 1;
 		return CMD_RETURN_OK;
 	}
 
+	cmd_head->data_len = len + sizeof(*cmd_data);
+	context->send_data.total_len += sizeof(*cmd_head) + cmd_head->data_len;
+
+	/*  have read data from stderr, wake up sock, and start send. */
 	FD_SET(context->sock, &context->wfds);
 
 	return CMD_RETURN_OK;
+}
+
+CMD_RETURN write_mirror(struct cmdd_context *context)
+{
+	int len;
+	CMD_RETURN retval;
+
+	/*  write mirror data to mirror as stdin */
+	len = write(context->mirror, context->mirror_data.data + context->mirror_data.curr_offset, context->mirror_data.total_len - context->mirror_data.curr_offset);
+	if (len < 0) {
+		fprintf(stderr, "write mirror failed, %s\n", strerror(errno));
+		return CMD_RETURN_ERR;
+	}
+
+	context->mirror_data.curr_offset += len;
+
+	if (context->mirror_data.total_len == context->mirror_data.curr_offset) {
+		/* if all data has been written to mirror as stin, stop write event, and reset buffer length info */
+		FD_CLR(context->mirror, &context->wfds);
+		context->mirror_data.total_len = 0;
+		context->mirror_data.curr_offset = 0;
+	} else if (context->mirror_data.total_len  > context->mirror_data.curr_offset) {
+		/*  exists more data, move data to the beggining of the buffer */
+		memmove(context->mirror_data.data, context->mirror_data.data + context->mirror_data.curr_offset, context->mirror_data.total_len - context->mirror_data.curr_offset);
+		context->mirror_data.total_len -= context->mirror_data.curr_offset;
+		context->mirror_data.curr_offset = 0;
+	} else  {
+		fprintf(stderr, "BUG: internal error, data length mismach.");
+		return CMD_MSG_DATA_ERR;
+	}
+
+	if (context->is_sock_eof == 0 || context->recv_data.total_len > context->recv_data.curr_offset) {
+		/*  Have enough free buff and recv buffer has data, wake up sock for reading. */
+		FD_SET(context->sock, &context->rfds);
+	}
+
+	/*  process CMD_MSG_DATA_IN message */
+	retval = process_msg(context);
+
+	if (context->is_sock_eof == 1 && context->mirror_data.total_len == 0 && context->recv_data.total_len == 0) {
+		/*  if sock recv is closed and all data has been sent, then shutdown mirror stdin, notify child process exit. */
+		if (context->isatty) {
+			/*  interactive shell, just close fd */
+			close(context->mirror);
+			context->mirror = -1;
+			if (context->mirror_err > 0) {
+				close(context->mirror_err);
+				context->mirror_err = -1;
+			}
+		} else {
+			/*  socketpair, do shutdown write */
+			shutdown(context->mirror, SHUT_WR);
+			if (context->mirror_err > 0) {
+				shutdown(context->mirror_err, SHUT_WR);
+			}
+		}
+
+	}
+
+	return retval;
+
 }
 
 CMD_RETURN read_mirror(struct cmdd_context *context)
@@ -357,6 +456,7 @@ CMD_RETURN read_mirror(struct cmdd_context *context)
 	int need_size;
 
 	free_buff_size = sizeof(context->send_data.data)  - context->send_data.total_len;
+	/*  if free space is not enougth, then block reading from stdout */
 	need_size = sizeof(struct jailed_cmd_head) + sizeof(struct jailed_cmd_data) + 16;
 	if ((free_buff_size - need_size) < 0) {
 		FD_CLR(context->mirror, &context->rfds);
@@ -380,17 +480,17 @@ CMD_RETURN read_mirror(struct cmdd_context *context)
 		FD_CLR(context->mirror, &context->rfds);
 		context->is_mirror_eof = 1;
 		return retval;
-	} 
-
-	cmd_head->data_len = len + sizeof(*cmd_data);
-	context->send_data.total_len += sizeof(*cmd_head) + cmd_head->data_len;
-
-	if (len == 0 ) {
+	} else 	if (len == 0 ) {
+		/*  end of mirror stdout, stop read stdout.*/
 		FD_CLR(context->mirror, &context->rfds);
 		context->is_mirror_eof = 1;
 		return CMD_RETURN_EXIT;
 	}
 
+	cmd_head->data_len = len + sizeof(*cmd_data);
+	context->send_data.total_len += sizeof(*cmd_head) + cmd_head->data_len;
+
+	/*  have read data from mirror as stdout, wake up sock, and start send to client. */
 	FD_SET(context->sock, &context->wfds);
 
 	return CMD_RETURN_OK;
@@ -400,12 +500,14 @@ void send_exit_code(struct cmdd_context *context)
 {
 	int status = 0x100;
 
+	/*  send last remain data to client with block io */
 	if (context->send_data.total_len > 0) {
-		send(context->sock, context->send_data.data + context->send_data.curr_offset, context->send_data.total_len - context->send_data.curr_offset, MSG_NOSIGNAL | MSG_DONTWAIT);
+		send(context->sock, context->send_data.data + context->send_data.curr_offset, context->send_data.total_len - context->send_data.curr_offset, MSG_NOSIGNAL);
 		context->send_data.total_len = 0;
 		context->send_data.curr_offset = 0;
 	}
 
+	/* send child process exit code to client. */
 	struct jailed_cmd_head *cmd_head = (struct jailed_cmd_head *)(context->send_data.data + context->send_data.total_len);
 	struct jailed_cmd_exit *cmd_exit = (struct jailed_cmd_exit *)cmd_head->data;
 	cmd_head->magic = MSG_MAGIC;
@@ -413,13 +515,14 @@ void send_exit_code(struct cmdd_context *context)
 	cmd_head->data_len = sizeof(*cmd_exit);
 	context->send_data.total_len += sizeof(*cmd_head) + cmd_head->data_len;
 
+	/*  get child process exit code. */
 	if (waitpid(context->child_pid, &status, 0) < 0) {
 		fprintf(stderr, "wait pid failed.\n");
 	}
 
 	cmd_exit->exit_code = WEXITSTATUS(status);
 
-	send(context->sock, context->send_data.data + context->send_data.curr_offset, context->send_data.total_len - context->send_data.curr_offset, MSG_NOSIGNAL | MSG_DONTWAIT);
+	send(context->sock, context->send_data.data + context->send_data.curr_offset, context->send_data.total_len - context->send_data.curr_offset, MSG_NOSIGNAL);
 }
 
 void server_loop(struct cmdd_context *context)
@@ -439,7 +542,6 @@ void server_loop(struct cmdd_context *context)
 	context->maxfd = max(context->sock, context->maxfd);
 	
 	while (1) {
-
 		rfds_set = context->rfds;
 		wfds_set = context->wfds;
 
@@ -455,6 +557,7 @@ void server_loop(struct cmdd_context *context)
 		}
 
 		if (FD_ISSET(context->sock, &rfds_set)) {
+			/*  recv message from client */
 			retval = recv_sock(context);
 			if (retval == CMD_RETURN_EXIT) {
 				goto out;
@@ -464,7 +567,18 @@ void server_loop(struct cmdd_context *context)
 		}
 
 		if (FD_ISSET(context->sock, &wfds_set)) {
+			/*  send message to client */
 			retval = send_sock(context);
+			if (retval == CMD_RETURN_EXIT) {
+				goto out;
+			} else if (retval == CMD_RETURN_ERR) {
+				goto errout;
+			}
+		}
+		
+		if (FD_ISSET(context->mirror, &wfds_set)) {
+			/*  write data to child's stdin */
+			retval = write_mirror(context);
 			if (retval == CMD_RETURN_EXIT) {
 				goto out;
 			} else if (retval == CMD_RETURN_ERR) {
@@ -473,6 +587,7 @@ void server_loop(struct cmdd_context *context)
 		}
 
 		if (context->mirror_err > 0 && FD_ISSET(context->mirror_err, &rfds_set)) {
+			/*  read data from child's stderr */
 			retval = read_mirror_err(context);
 			if (retval == CMD_RETURN_EXIT) {
 				goto out;
@@ -482,6 +597,7 @@ void server_loop(struct cmdd_context *context)
 		}
 
 		if (FD_ISSET(context->mirror, &rfds_set)) {
+			/*  read data from child's stdout */
 			retval = read_mirror(context);
 			if (retval == CMD_RETURN_EXIT) {
 				goto out;
@@ -523,6 +639,7 @@ void serve(int sock)
 
 	context->sock = sock;
 
+	/*  restore SIGCHLD handle to default*/
 	signal(SIGCHLD, SIG_DFL);
 	server_loop(context);
 	
@@ -636,6 +753,7 @@ int main(int argc, char *argv[])
 		//return 1;	
 	}
 
+	/*  ignore SIGCHLD, child will be recycled automatically */
 	signal(SIGCHLD, SIG_IGN);
 	signal(SIGPIPE, SIG_IGN);
 

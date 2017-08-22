@@ -11,7 +11,6 @@ struct termios tmios;
 struct cmd_context {
 	int sock;
 	int maxfd;
-
 	int isatty;
 	
 	fd_set rfds;
@@ -58,6 +57,7 @@ void reset_term(void)
 	tcsetattr(STDIN_FILENO, TCSANOW, &tmios);
 }
 
+/*  send user information, term information, args to peer server. */
 int cmd_init(struct cmd_context *context, int argc, char *argv[])
 {
 	struct jailed_cmd_head *cmd_head = (struct jailed_cmd_head *)context->send_data.data;
@@ -74,17 +74,23 @@ int cmd_init(struct cmd_context *context, int argc, char *argv[])
 	cmd->gid = getegid();
 	cmd->isatty = isatty(STDIN_FILENO);
 	if (cmd->isatty) {
+		/*  send term name to server */
 		if (getenv("TERM") != NULL) {
 			snprintf(cmd->term, TMP_BUFF_LEN_32, getenv("TERM"));
 		} else {
 			snprintf(cmd->term, TMP_BUFF_LEN_32, "xterm");
 		}
 		
+		/*  send term win size to server */
 		if (ioctl(STDIN_FILENO, TIOCGWINSZ, &cmd->ws) != 0) {
 			fprintf(stderr, "get console win size failed, %s\r\n", strerror(errno));
 			return 1;
 		}
 	}
+	
+	/*  send args to server 
+	 *  data format: arg0\0arg1\0arg2\0...argn\0\0"
+	 */
 	
 	cmd->argc = argc;
 	for (i = 0; i < argc; i++) {
@@ -101,14 +107,15 @@ int cmd_init(struct cmd_context *context, int argc, char *argv[])
 
 CMD_RETURN read_stdin(struct cmd_context *context) 
 {
-	int free_buff_size;
-	int need_size;
 	int len;
+	int need_size;
+	int free_buff_size;
 
 	struct jailed_cmd_head *cmd_head;
 	struct jailed_cmd_data *cmd_data;
 
 	free_buff_size = sizeof(context->send_data.data)  - context->send_data.total_len;
+	/*  if free space is not enougth, then block reading from stdin */
 	need_size = sizeof(struct jailed_cmd_head) + sizeof(struct jailed_cmd_data) + 16;
 	if ((free_buff_size - need_size) < 0) {
 		FD_CLR(STDIN_FILENO, &context->rfds);
@@ -125,6 +132,7 @@ CMD_RETURN read_stdin(struct cmd_context *context)
 		fprintf(stderr, "read mirror failed, %s\r\n", strerror(errno));
 		return CMD_RETURN_ERR;
 	} else if (len == 0) {
+		/*  end of stdin, stop read stdin, and wake up sock , to send remain data to server.*/
 		FD_CLR(STDIN_FILENO, &context->rfds);
 		context->is_stdin_eof = 1;
 		FD_SET(context->sock, &context->wfds);
@@ -135,29 +143,34 @@ CMD_RETURN read_stdin(struct cmd_context *context)
 	context->send_data.total_len += sizeof(*cmd_head) + cmd_head->data_len;
 
 	if (context->isatty && len == 1 && cmd_data->data[0] == '\35') {
+		/*  if user press CTRL + ], then force exit. */
 		FD_CLR(STDIN_FILENO, &context->rfds);
 		context->is_stdin_eof = 1;
 		cmd_head->magic = MSG_MAGIC;
 		cmd_head->type = CMD_MSG_DATA_EXIT;
 	}
 
+	/*  have read data from stdin, wake up sock, and start send. */
 	FD_SET(context->sock, &context->wfds);
 
 	return CMD_RETURN_OK;
 }
 
-CMD_RETURN process_msg(struct cmd_context *context, struct jailed_cmd_head *cmd_head) 
+CMD_RETURN process_cmd(struct cmd_context *context, struct jailed_cmd_head *cmd_head) 
 {	
 	switch (cmd_head->type) {
 	case CMD_MSG_DATA_OUT: {
+		 /*  Write out data to stdout */
 		struct jailed_cmd_data *cmd_data = (struct jailed_cmd_data *)cmd_head->data;
 		write(STDOUT_FILENO, cmd_data->data, cmd_head->data_len);
 		break; }
 	case CMD_MSG_DATA_ERR: {
+		 /*  Write err data to stderr */
 		struct jailed_cmd_data *cmd_data = (struct jailed_cmd_data *)cmd_head->data;
 		write(STDERR_FILENO, cmd_data->data, cmd_head->data_len);
 		break; }
 	case CMD_MSG_EXIT_CODE: {
+		/*  get exit code from peer child process */
 		struct jailed_cmd_exit *cmd_exit = (struct jailed_cmd_exit *)cmd_head->data;
 		context->prog_exit = cmd_exit->exit_code;
 		return CMD_RETURN_EXIT;
@@ -174,6 +187,7 @@ CMD_RETURN send_sock(struct cmd_context *context)
 {
 	int len;
 
+	/*  send data to server */
 	len = send(context->sock, context->send_data.data + context->send_data.curr_offset, context->send_data.total_len - context->send_data.curr_offset, MSG_NOSIGNAL | MSG_DONTWAIT);
 	if (len < 0) {
 		fprintf(stderr, "socket send failed,  %s\r\n", strerror(errno));
@@ -182,21 +196,26 @@ CMD_RETURN send_sock(struct cmd_context *context)
 	context->send_data.curr_offset += len;
 	
 	if (context->send_data.curr_offset == context->send_data.total_len) {
+		/*  if all data has been sent, stop send event, and reset buffer length info */
 		FD_CLR(context->sock, &context->wfds);
-		if (context->is_stdin_eof == 0) {
-			FD_SET(STDIN_FILENO, &context->rfds);
-		} else {
-			shutdown(context->sock, SHUT_WR);
-		}
 		context->send_data.total_len = 0;
 		context->send_data.curr_offset = 0;
-	} else if (context->send_data.curr_offset > context->send_data.total_len) {
-		fprintf(stderr, "BUG: internal error, data length mismach\r\n");
-		return CMD_RETURN_ERR;
-	} else {
+	} else if (context->send_data.curr_offset < context->send_data.total_len){
+		/*  exists more data, move data to the beggining of the buffer */
 		memmove(context->send_data.data, context->send_data.data + context->send_data.curr_offset, context->send_data.total_len - context->send_data.curr_offset);
 		context->send_data.total_len = context->send_data.total_len - context->send_data.curr_offset;
 		context->send_data.curr_offset = 0;
+	} else {
+		fprintf(stderr, "BUG: internal error, data length mismach\r\n");
+		return CMD_RETURN_ERR;
+	}
+
+	if (context->is_stdin_eof == 0) {
+		/*  Have enough free buff now, wake up stdin, and read. */
+		FD_SET(STDIN_FILENO, &context->rfds);
+	} else if (context->is_stdin_eof == 1 && context->send_data.total_len == 0) {
+		/*  if stdin is closed and all data has been sent, then shutdown sock, to notify peer server exit. */
+		shutdown(context->sock, SHUT_WR);
 	}
 
 	return CMD_RETURN_OK;
@@ -208,32 +227,39 @@ CMD_RETURN recv_sock(struct cmd_context *context)
 	struct jailed_cmd_head *cmd_head;
 	CMD_RETURN retval;
 
+	/*  recv data from peer server */
 	len = recv(context->sock, context->recv_data.data + context->recv_data.total_len, sizeof(context->recv_data.data) - context->recv_data.total_len, MSG_DONTWAIT);	
 	if (len < 0) {
 		fprintf(stderr, "recv from socket failed, %s\r\n", strerror(errno));
 		return CMD_RETURN_ERR;
 	} else if (len == 0) {
+		/*  if peer server closed, then exit. */
 		FD_CLR(context->sock, &context->rfds);
 		return CMD_RETURN_EXIT;
 	}
 
 	context->recv_data.total_len += len;
+
+	/*  process data which received from server. */
 	while (1) {
+		/*  if data is partial, continue recv */
 		if (context->recv_data.total_len - context->recv_data.curr_offset < sizeof(struct jailed_cmd_head)) {
 			break;
 		}
 
 		cmd_head = (struct jailed_cmd_head *)(context->recv_data.data + context->recv_data.curr_offset);
 		if (cmd_head->magic != MSG_MAGIC || cmd_head->data_len > sizeof(context->recv_data.data) - sizeof(struct jailed_cmd_head)) {
+			/*  if recevied error data, exit. */
 			fprintf(stderr, "Data invalid\r\n"); 
 			return CMD_RETURN_ERR;
 		}
 
+		/*  if data is partial, continue recv */
 		if (context->recv_data.total_len - context->recv_data.curr_offset < sizeof(struct jailed_cmd_head) + cmd_head->data_len) {
 			break;
 		}
 
-		retval = process_msg(context, cmd_head);
+		retval = process_cmd(context, cmd_head);
 		if (retval != CMD_RETURN_OK) {
 			return retval;
 		}
@@ -241,17 +267,19 @@ CMD_RETURN recv_sock(struct cmd_context *context)
 		context->recv_data.curr_offset += sizeof(struct jailed_cmd_head) + cmd_head->data_len;
 	}
 
-	if (context->recv_data.total_len > context->recv_data.curr_offset) {
+	if (context->recv_data.total_len == context->recv_data.curr_offset) {
+		/*  if all data has been proceed, reset buffer length info */
+		context->recv_data.curr_offset = 0;
+		context->recv_data.total_len = 0;
+	} else if (context->recv_data.total_len > context->recv_data.curr_offset) {
+		/*  exists more data, move data to the beggining of the buffer */
 		memmove(context->recv_data.data, context->recv_data.data + context->recv_data.curr_offset, context->recv_data.total_len - context->recv_data.curr_offset);
 		context->recv_data.total_len -= context->recv_data.curr_offset;
 		context->recv_data.curr_offset = 0;
-	} else if (context->recv_data.total_len == context->recv_data.curr_offset) {
-		context->recv_data.curr_offset = 0;
-		context->recv_data.total_len = 0;
 	} else {
 		fprintf(stderr, "BUG: internal error, data length mismach\r\n");
+		return CMD_RETURN_ERR;
 	}
-
 
 	return CMD_RETURN_OK;
 }
@@ -269,12 +297,13 @@ int set_win_size(struct cmd_context *context)
 		return 0;
 	}
 
+	/*  if terminal win size changed, read winsize and send to peer server */
 	cmd_head = (struct jailed_cmd_head *)(context->send_data.data + context->send_data.total_len);
 	cmd_winsize = (struct jailed_cmd_winsize *)cmd_head->data;
 	cmd_head->magic = MSG_MAGIC;
 	cmd_head->type = CMD_MSG_WINSIZE;
 	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &cmd_winsize->ws) != 0) {
-		fprintf(stderr, "get console win size failed, %s", strerror(errno));
+		fprintf(stderr, "get console win size failed, %s\r\n", strerror(errno));
 		return 1;
 	}	
 
@@ -282,6 +311,7 @@ int set_win_size(struct cmd_context *context)
 	context->send_data.total_len += sizeof(*cmd_head) + cmd_head->data_len;
 
 	window_size_changed = 0;
+	/*  set sock write event, to send win size info. */
 	FD_SET(context->sock, &context->wfds);
 
 	return 0;
@@ -300,6 +330,7 @@ int cmd_loop(struct cmd_context *context)
 
 	FD_SET(STDIN_FILENO, &context->rfds);
 	FD_SET(context->sock, &context->rfds);
+	/*  this event will send CMD_MSG_CMD message initialized by cmd_init*/
 	FD_SET(context->sock, &context->wfds);
 	
 	while (1) {
@@ -323,6 +354,7 @@ int cmd_loop(struct cmd_context *context)
 		}
 
 		if (FD_ISSET(context->sock, &rfds_set)) {
+			/*  recv message from peer server */
 			retval = recv_sock(context);
 			if (retval == CMD_RETURN_EXIT) {
 				goto out;
@@ -332,6 +364,7 @@ int cmd_loop(struct cmd_context *context)
 		}
 
 		if (FD_ISSET(context->sock, &wfds_set)) {
+			/*  send message to peer server */
 			retval = send_sock(context);
 			if (retval == CMD_RETURN_EXIT) {
 				goto out;
@@ -341,6 +374,7 @@ int cmd_loop(struct cmd_context *context)
 		}
 
 		if (FD_ISSET(STDIN_FILENO, &rfds_set)) {
+			/*  read data from stdin */
 			retval = read_stdin(context);
 			if (retval == CMD_RETURN_EXIT) {
 				goto out;
@@ -359,7 +393,7 @@ errout:
 
 int run_cmd(int argc, char * argv[], int port)
 {
-	int client;
+	int client = -1;
 	struct cmd_context *context;
 	struct sockaddr_in server_addr;
 	int retval = 1;
@@ -394,12 +428,14 @@ int run_cmd(int argc, char * argv[], int port)
 	set_sock_opt(client);
 
 	context->sock = client;
+	
+	/*  whether current shell is interactive */
 	context->isatty = isatty(STDIN_FILENO);
 	
 	if (context->isatty) {
+		/*  if current shell is interactive, then make this shell in raw mode. */
 		set_term();
 	}
-
 
 	retval = cmd_loop(context);
 
@@ -432,6 +468,7 @@ void signal_handler(int sig)
 		return;
 		break;
 	}
+
 	onexit();
 	_exit(1);
 }
@@ -445,6 +482,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
+	/*  if command is not executed from symbol link, the arg[1] is the command will being executed */
 	if (!S_ISLNK(buf.st_mode)) {
 		argc -= 1;
 		argv++;
@@ -454,7 +492,6 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 	}
-
 
 	atexit(onexit);
 	signal(SIGWINCH, signal_handler);

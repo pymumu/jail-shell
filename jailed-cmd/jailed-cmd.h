@@ -49,6 +49,7 @@ typedef enum CMD_RETURN {
 	CMD_RETURN_OK      = 0,
 	CMD_RETURN_EXIT    = 1,
 	CMD_RETURN_ERR     = 2,
+	CMD_RETURN_CONT    = 3,
 	CMD_RETURN_BUTT    =255
 }CMD_RETURN;
 
