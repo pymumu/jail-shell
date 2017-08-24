@@ -138,7 +138,7 @@ int start_process(struct jailed_cmd_cmd *cmd_cmd, int *mirror, int *mirror_err)
 	int i = 0;
 	int len = 0;
 	int pid = -1;
-
+	
 	/*  get args to standard parameter: argc, argv[] */
 	for (i = 0; i < cmd_cmd->argc; i++) {
 		argv[i] = cmd_cmd->argvs + len;
@@ -164,11 +164,44 @@ int start_process(struct jailed_cmd_cmd *cmd_cmd, int *mirror, int *mirror_err)
 		}
 		setenv("TERM", cmd_cmd->term, 1);
 		execv(argv[0], argv);
-		printf("%s : %s\n", argv[0], strerror(errno));
+		fprintf(stderr, "sh: %s: %s\n", argv[0], strerror(errno));
 		_exit(0);
 	} 
 
 	return pid;
+}
+
+int check_args(struct cmdd_context *context, struct jailed_cmd_head *cmd_head, struct jailed_cmd_cmd *cmd_cmd)
+{
+	int arg_len;
+	int argc = cmd_cmd->argc;
+	int arg_count = 0;
+	int i;
+
+	if (argc > MAX_ARGS_COUNT) {
+		fprintf(stderr, "too many args\n");
+		return 1;
+	}
+
+	if (cmd_head->data_len > sizeof(context->recv_data.data) - sizeof(*cmd_head)) {
+		fprintf(stderr, "cmd length is invalid.\n");
+		return 1;
+	}
+
+	/*  check arg number is valid. */
+	arg_len = cmd_head->data_len - sizeof(*cmd_cmd);
+	for (i = 0; i < arg_len; i++) {
+		if (cmd_cmd->argvs[i] == 0) {
+			arg_count++;
+		}
+	}
+
+	if (argc != arg_count) {
+		fprintf(stderr, "arg number is invalid.\n");
+		return 1;
+	}
+
+	return 0;
 }
 
 CMD_RETURN process_cmd(struct cmdd_context *context, struct jailed_cmd_head *cmd_head) 
@@ -177,6 +210,12 @@ CMD_RETURN process_cmd(struct cmdd_context *context, struct jailed_cmd_head *cmd
 	case CMD_MSG_CMD: {
 		/*  init cmd message */
 		struct jailed_cmd_cmd *cmd_cmd = (struct jailed_cmd_cmd *)cmd_head->data;
+
+		if (check_args(context, cmd_head, cmd_cmd)) {
+			FD_CLR(context->sock, &context->rfds);
+			return CMD_RETURN_ERR;
+		}
+
 		context->child_pid = start_process(cmd_cmd, &context->mirror, &context->mirror_err);
 		context->isatty = cmd_cmd->isatty;
 

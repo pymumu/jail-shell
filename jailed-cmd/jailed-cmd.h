@@ -25,6 +25,7 @@
 
 #define TMP_BUFF_LEN_32 32
 #define SOCKET_BUFF_LEN (1024 * 32)
+#define MAX_ARGS_COUNT 1024
 
 #define MSG_MAGIC 0x615461446C49614A /* JaIlDaTa */
 

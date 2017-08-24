@@ -2,11 +2,10 @@
 #define _BSD_SOURCE
 #include "jailed-cmd.h"
 
-#define JAILED_CMD_NAME "jailed-cmd"
-
 int window_size_changed = 0;
 int is_term_mode_change = 0;
 struct termios tmios;
+int is_atty = 0;
 
 struct cmd_context {
 	int sock;
@@ -72,7 +71,7 @@ int cmd_init(struct cmd_context *context, int argc, char *argv[])
 
 	cmd->uid = geteuid();
 	cmd->gid = getegid();
-	cmd->isatty = isatty(STDIN_FILENO);
+	cmd->isatty = is_atty;
 	if (cmd->isatty) {
 		/*  send term name to server */
 		if (getenv("TERM") != NULL) {
@@ -93,6 +92,11 @@ int cmd_init(struct cmd_context *context, int argc, char *argv[])
 	 */
 	
 	cmd->argc = argc;
+	if (argc > MAX_ARGS_COUNT) {
+		fprintf(stderr, "too many args list.\r\n");
+		return 1;
+	}
+
 	for (i = 0; i < argc; i++) {
 		strncpy(cmd->argvs + arg_len, argv[i], sizeof(context->send_data.data) - sizeof(*cmd_head) - sizeof(*cmd) - arg_len);
 		arg_len += strlen(argv[i]) + 1;
@@ -430,7 +434,7 @@ int run_cmd(int argc, char * argv[], int port)
 	context->sock = client;
 	
 	/*  whether current shell is interactive */
-	context->isatty = isatty(STDIN_FILENO);
+	context->isatty = is_atty;
 	
 	if (context->isatty) {
 		/*  if current shell is interactive, then make this shell in raw mode. */
@@ -453,7 +457,7 @@ errout:
 
 void onexit(void) 
 {
-	if (isatty(STDIN_FILENO)) {
+	if (is_atty) {
 		reset_term();
 	}
 }
@@ -462,7 +466,7 @@ void signal_handler(int sig)
 {
 	switch(sig) {
 	case SIGWINCH: 
-		if (isatty(STDIN_FILENO)) {
+		if (is_atty) {
 			window_size_changed = 1;
 		}
 		return;
@@ -492,6 +496,8 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 	}
+
+	is_atty = (isatty(STDIN_FILENO) && isatty(STDOUT_FILENO)) ? 1 : 0;
 
 	atexit(onexit);
 	signal(SIGWINCH, signal_handler);

@@ -7,94 +7,64 @@ void set_sock_opt(int sock)
 
 }
 
-char *normalize_path(char *path) 
+int normalize_path(char *path) 
 {
-	char *next = path;
-	char *start ;
-	int is_slash = 0;
-	int first_dot = 0;
-	int second_dot = 0;
-	int dot_dir = 0;
+	char *temp = NULL;
+	char *begin = path;
+	char *nextadd = path;
+	char *nextcmp = path;
 
-	for (next = path; *next; next++) {
-		/*  if start with /, then set slash start flag. */
-		if (*next == '/' && is_slash == 0) {
-
-			is_slash = 1;
-			start = next;
-			continue;
-		}
-
-		/*  if not slash, skip and check. */
-		if (*next != '/' && is_slash == 0) {
-			continue;
-		}
-
-		if (*next != '.' && *next != '/' && is_slash == 1) {
-			is_slash = 0;
-			continue;
-		}
-
-		if (*next == '/' && is_slash == 1) {
-			/*  if /.../  */
-			if (dot_dir) {
-				second_dot = 0;
-				first_dot = 0;
-				dot_dir = 0;
-				start = next;
-				continue;
-			}
-
-			/*  if //  */
-			if (first_dot == 0) {
-				strcpy(start, next);
-				next = start;
-				continue;
-			}
-
-			/*  if /../  */
-			if (second_dot == 1) {
-				second_dot = 0;
-				first_dot = 0;
-
-				/*  find previous slash */
-				while (start > path) {
-					start--;
-					if (*start == '/') {
-						break;
-					}
-				}
-
-				strcpy(start, next);
-				next = start;
-				continue;
-			}
-			
-			/* if /./ */
-			if (first_dot == 1 ) {
-				first_dot = 0;
-				second_dot = 0;
-				strcpy(start, next);
-				next = start;
-				continue;
-			}
-			continue;
-		}
-
-		/*  if is slash + ., count dot number */
-		if (*next == '.') {
-			if (first_dot == 0) {
-				first_dot = 1;
-			} else if (second_dot == 0) {
-				second_dot = 1;
-			} else {
-				/* if dot number is more than two ,then this is a dir. */
-				dot_dir = 1;
-			}
-			continue;
-		}
-
+	/*  skip space */
+	while (*nextcmp == '\x20') {
+		nextcmp++;
 	}
 
-	return path;
+	/*  if not start with /, return 0 */
+	if (*nextcmp != '/' || nextcmp[0] == '\0') {
+		return 0;
+	}
+
+
+	*nextadd = *nextcmp;
+	nextadd++;
+	nextcmp++;
+
+	while (*nextcmp) {
+		if (*nextcmp == '.') {
+			if (nextcmp[1] == '/' || nextcmp[1] == '\0') {
+				nextcmp += 2;
+				continue;
+			} else if (nextcmp[1] == '.' && (nextcmp[2] == '/' || nextcmp[2] == '\0')) {
+				temp = nextadd + 1;
+				if (temp == begin) {
+					nextcmp += 3;
+					continue;
+				}
+
+				while (*(--temp) != '/') {
+				}
+
+				nextadd = temp + 1;
+				nextcmp += 3;
+				continue;
+			}
+		} else if (*nextcmp == '/') {
+			nextcmp++;
+			continue;
+		}
+
+		while (*nextcmp && (*nextadd++ = *nextcmp++) != '/') {
+		}
+	}
+
+	temp = nextadd;
+	if (*(temp - 1) == '/') {
+		temp--;
+	}
+
+	while (*temp != 0) {
+		*temp++ = 0;
+	}
+
+	return nextadd - begin;
 }
