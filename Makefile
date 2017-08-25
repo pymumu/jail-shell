@@ -1,0 +1,21 @@
+
+JAILED_CMD_DIR=jailed-cmd
+JAILED_CMD_BIN=$(JAILED_CMD_DIR)/jailed-cmd
+JAILEDD_CMD_BIN=$(JAILED_CMD_DIR)/jailed-cmdd
+
+PAM_CHROOT_DIR=pam_chroot
+PAM_CHROOT_BIN=$(PAM_CHROOT_DIR)/pam_chroot.so
+
+.PHONY: all JAILED_CMD PAM_CHROOT
+
+all: JAILED_CMD PAM_CHROOT
+
+JAILED_CMD: 
+	$(MAKE) -C $(JAILED_CMD_DIR) all
+
+PAM_CHROOT: 
+	$(MAKE) -C $(PAM_CHROOT_DIR) all
+
+clean:
+	$(MAKE) -C $(JAILED_CMD_DIR) clean
+	$(MAKE) -C $(PAM_CHROOT_DIR) clean

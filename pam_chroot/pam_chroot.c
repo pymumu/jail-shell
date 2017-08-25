@@ -638,10 +638,8 @@ int _pam_get_chrootdir(const char* user, _opts* opts) {
  *  then pass it to this function */
 int _pam_do_chroot(pam_handle_t *pamh, _opts *opts) {
   int err,debug;
-  char *name;
   char const *user;
 
-  name = NULL;
   debug = opts->flags & _PAM_OPTS_DEBUG;
 
   err = pam_get_user(pamh, &user, NULL);

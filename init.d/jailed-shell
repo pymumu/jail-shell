@@ -1,0 +1,58 @@
+#!/bin/sh
+
+### BEGIN INIT INFO
+# Provides:        jailed-shell
+# Required-Start:  $network $remote_fs $syslog
+# Required-Stop:   $network $remote_fs $syslog
+# Default-Start:   2 3 4 5
+# Default-Stop:
+# Short-Description: Start jailed-shell daemon
+### END INIT INFO
+
+PATH=/sbin:/bin:/usr/sbin:/usr/bin
+
+. /lib/lsb/init-functions
+
+DAEMON=/usr/sbin/jailed-cmdd
+PIDFILE=/var/run/jailed-cmdd.pid
+
+test -x $DAEMON || exit 5
+
+case $1 in
+        start)
+                log_daemon_msg "Starting jailed-shell server" "jailed-cmdd"
+                if [ -z "$UGID" ]; then
+                        log_failure_msg "user \"$RUNASUSER\" does not exist"
+                        exit 1
+                fi
+                start-stop-daemon --start --quiet --oknodo --pidfile $PIDFILE --startas $DAEMON -- -p $PIDFILE $JAILED_CMDDD_OPTS
+                status=$?
+                log_end_msg $status
+                ;;
+        stop)
+                log_daemon_msg "Stopping jailed-shell server" "jailed-cmdd"
+                start-stop-daemon --stop --quiet --oknodo --pidfile $PIDFILE
+                rm -f $PIDFILE
+                ;;
+        restart|force-reload)
+                $0 stop && sleep 2 && $0 start
+                ;;
+        try-restart)
+                if $0 status >/dev/null; then
+                        $0 restart
+                else
+                        exit 0
+                fi
+                ;;
+        reload)
+                exit 3
+                ;;
+        status)
+                status_of_proc $DAEMON "jailed-shell server"
+                ;;
+        *)
+                echo "Usage: $0 {start|stop|restart|try-restart|force-reload|status}"
+                exit 2
+                ;;
+esac
+
