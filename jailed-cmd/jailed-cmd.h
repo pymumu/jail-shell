@@ -8,6 +8,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <linux/limits.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/ioctl.h>
@@ -26,6 +27,8 @@
 #define TMP_BUFF_LEN_32 32
 #define SOCKET_BUFF_LEN (1024 * 32)
 #define MAX_ARGS_COUNT 1024
+
+#define DEFAULT_PORT 21104
 
 #define MSG_MAGIC 0x615461446C49614A /* JaIlDaTa */
 
@@ -90,6 +93,8 @@ struct sock_data {
 };
 
 extern void set_sock_opt(int sock);
+
+extern int normalize_path(char *path);
 
 #endif
 

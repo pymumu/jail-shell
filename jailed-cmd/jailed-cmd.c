@@ -23,6 +23,14 @@ struct cmd_context {
 	int prog_exit;
 };
 
+struct cmd_config {
+	int port;
+};
+
+struct cmd_config config = {
+	.port = DEFAULT_PORT,
+};
+
 void help(void)
 {
 	char *help = ""
@@ -504,6 +512,6 @@ int main(int argc, char *argv[])
 	signal(SIGTERM, signal_handler);
 	signal(SIGQUIT, signal_handler);
 
-	return run_cmd(argc, argv, 9999);
+	return run_cmd(argc, argv, config.port);
 }
 

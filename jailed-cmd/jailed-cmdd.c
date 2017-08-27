@@ -4,6 +4,8 @@
 #include <fcntl.h>
 
 #define PID_FILE_PATH "/var/run/jailed-cmdd.pid"
+#define DEFAULT_ROOT_DIR "/usr/local/jailed-shell/command"
+
 struct cmdd_context {
 	int sock;
 	int mirror;
@@ -24,6 +26,20 @@ struct cmdd_context {
 	struct sock_data send_data;
 	struct sock_data recv_data;
 	struct sock_data mirror_data;
+};
+
+
+struct cmdd_config {
+	int port;
+	char rootdir[PATH_MAX];
+	int enable_log;
+};
+
+
+struct cmdd_config config = {
+	.port = DEFAULT_PORT,
+	.rootdir = DEFAULT_ROOT_DIR,
+	.enable_log = 1,
 };
 
 void help(void)
@@ -131,6 +147,36 @@ int forksocket(int *mirror, int *mirror_err)
 	return pid;
 }
 
+void run_process(int argc, char *argv[]) 
+{
+	char cmd_name[PATH_MAX];
+	char cmd_path[PATH_MAX];
+	char prog[PATH_MAX];
+	int len = 0;
+
+	snprintf(cmd_name, PATH_MAX, "/%s", argv[0]);
+	if (normalize_path(cmd_name) <= 0) {
+		goto errout;
+	}
+
+	snprintf(cmd_path, PATH_MAX, "%s%s", config.rootdir, cmd_name);
+
+	if (chdir("/tmp") < 0) {
+		goto errout;
+	}
+
+	len = readlink(cmd_path, prog, sizeof(prog));
+	if (len < 0) {
+		goto errout;
+	}
+	prog[len] = 0;
+
+	execv(prog, argv);
+
+errout:
+	fprintf(stderr, "-sh: %s: %s\n", argv[0], strerror(errno));
+}
+
 int start_process(struct jailed_cmd_cmd *cmd_cmd, int *mirror, int *mirror_err)
 {
 	int argc = cmd_cmd->argc;
@@ -163,9 +209,8 @@ int start_process(struct jailed_cmd_cmd *cmd_cmd, int *mirror, int *mirror_err)
 			close(*mirror_err);
 		}
 		setenv("TERM", cmd_cmd->term, 1);
-		execv(argv[0], argv);
-		fprintf(stderr, "sh: %s: %s\n", argv[0], strerror(errno));
-		_exit(0);
+		run_process(argc, argv);
+		_exit(1);
 	} 
 
 	return pid;
@@ -432,6 +477,15 @@ CMD_RETURN write_mirror(struct cmdd_context *context)
 	/*  write mirror data to mirror as stdin */
 	len = write(context->mirror, context->mirror_data.data + context->mirror_data.curr_offset, context->mirror_data.total_len - context->mirror_data.curr_offset);
 	if (len < 0) {
+		FD_CLR(context->mirror, &context->wfds);
+		if (errno == EPIPE) {
+			/* child process may exit, return ok to ensure all 
+		 	 * child out data has been sent to client 
+		 	 */
+			return CMD_RETURN_OK;
+
+		}
+
 		fprintf(stderr, "write mirror failed, %s\n", strerror(errno));
 		return CMD_RETURN_ERR;
 	}
@@ -471,6 +525,8 @@ CMD_RETURN write_mirror(struct cmdd_context *context)
 				close(context->mirror_err);
 				context->mirror_err = -1;
 			}
+
+			return CMD_RETURN_EXIT;
 		} else {
 			/*  socketpair, do shutdown write */
 			shutdown(context->mirror, SHUT_WR);
@@ -478,7 +534,6 @@ CMD_RETURN write_mirror(struct cmdd_context *context)
 				shutdown(context->mirror_err, SHUT_WR);
 			}
 		}
-
 	}
 
 	return retval;
@@ -796,5 +851,5 @@ int main(int argc, char *argv[])
 	signal(SIGCHLD, SIG_IGN);
 	signal(SIGPIPE, SIG_IGN);
 
-	return run_server(9999);
+	return run_server(config.port);
 }

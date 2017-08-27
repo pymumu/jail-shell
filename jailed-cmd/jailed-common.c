@@ -35,7 +35,7 @@ int normalize_path(char *path)
 				nextcmp += 2;
 				continue;
 			} else if (nextcmp[1] == '.' && (nextcmp[2] == '/' || nextcmp[2] == '\0')) {
-				temp = nextadd + 1;
+				temp = nextadd - 1;
 				if (temp == begin) {
 					nextcmp += 3;
 					continue;
