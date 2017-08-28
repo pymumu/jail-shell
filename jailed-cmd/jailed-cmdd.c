@@ -147,12 +147,34 @@ int forksocket(int *mirror, int *mirror_err)
 	return pid;
 }
 
+int injection_check(int argc, char *argv[])
+{
+	char *inject_char[] = {";", "|", "`", "$(", "&&", "||", ">", "<"};
+	int char_count = sizeof(inject_char) / sizeof(char*);
+	int i = 0; 
+	int j = 0; 
+	for (i = 0; i < argc; i++) {
+		for (j = 0; j < char_count; j++) {
+			if (strstr(argv[i], inject_char[j])) {
+				return 1;
+			}
+		}
+	}
+
+	return 0;
+}
+
 void run_process(int argc, char *argv[]) 
 {
 	char cmd_name[PATH_MAX];
 	char cmd_path[PATH_MAX];
 	char prog[PATH_MAX];
 	int len = 0;
+
+	if (injection_check(argc, argv)) {
+		errno = EINVAL;
+		goto errout;
+	}
 
 	snprintf(cmd_name, PATH_MAX, "/%s", argv[0]);
 	if (normalize_path(cmd_name) <= 0) {
