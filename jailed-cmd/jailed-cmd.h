@@ -2,6 +2,7 @@
 #ifndef _JAILED_CMD_
 #define _JAILED_CMD_
 
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <string.h>
 #include <sys/types.h>

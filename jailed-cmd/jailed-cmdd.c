@@ -262,6 +262,11 @@ CMD_RETURN process_cmd(struct cmdd_context *context, struct jailed_cmd_head *cmd
 		}
 
 		context->child_pid = start_process(cmd_cmd, &context->mirror, &context->mirror_err);
+		if (context->child_pid < 0) {
+			FD_CLR(context->sock, &context->rfds);
+			return CMD_RETURN_ERR;
+		}
+
 		context->isatty = cmd_cmd->isatty;
 
 		FD_SET(context->mirror, &context->rfds);
@@ -610,8 +615,10 @@ void send_exit_code(struct cmdd_context *context)
 	context->send_data.total_len += sizeof(*cmd_head) + cmd_head->data_len;
 
 	/*  get child process exit code. */
-	if (waitpid(context->child_pid, &status, 0) < 0) {
-		fprintf(stderr, "wait pid failed.\n");
+	if (context->child_pid > 0) {
+		if (waitpid(context->child_pid, &status, 0) < 0) {
+			fprintf(stderr, "wait pid failed.\n");
+		}
 	}
 
 	cmd_exit->exit_code = WEXITSTATUS(status);
@@ -789,6 +796,7 @@ int run_server(int port)
 	}
 
 	while (1) {
+		clilen = sizeof(client_addr);
 		sock = accept(server, (struct sockaddr *)&client_addr, &clilen);
 		if (sock < 0) {
 			fprintf(stderr, "accept connection failed, %s\n", strerror(errno));
