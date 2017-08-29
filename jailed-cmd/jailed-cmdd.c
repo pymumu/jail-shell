@@ -831,7 +831,13 @@ int run_server(int port)
 		if (pid == 0) {
 			close(server);
 			serve(sock);
-			shutdown(sock, SHUT_RDWR);
+
+			/* wait peer recv all data */
+			shutdown(sock, SHUT_WR);
+			char buf[4096];
+			while(recv(sock, buf, sizeof(buf), 0) > 0) {
+			}
+			shutdown(sock, SHUT_RD);
 			close(sock);
 			_exit(0);
 		} else if (pid > 0) {

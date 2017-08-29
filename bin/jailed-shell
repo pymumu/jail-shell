@@ -1,8 +1,15 @@
 #!/bin/sh
 
+showhelp()
+{
+	echo "Usage: jailed-shell [OPTION]"
+	echo "Options:"
+	echo ""
+}
+
 main()
 {
-
+	showhelp
 }
 
 
