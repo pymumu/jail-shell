@@ -15,6 +15,8 @@
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
+#include <pwd.h>
+#include <grp.h>
 #include <errno.h>
 #include <signal.h>
 #include <sys/wait.h>

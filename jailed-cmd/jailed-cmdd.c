@@ -147,6 +147,44 @@ int forksocket(int *mirror, int *mirror_err)
 	return pid;
 }
 
+int set_uid_gid(struct jailed_cmd_cmd *cmd_cmd)
+{
+	int uid = cmd_cmd->uid;
+	int gid = cmd_cmd->gid;
+	struct passwd *pwd;
+
+	pwd = getpwuid(uid);
+	if (pwd == NULL) {
+		fprintf(stderr, "User is invalid.\n");
+		goto errout;
+	}
+
+	setenv("LOGNAME", pwd->pw_name, 1);
+	setenv("USER", pwd->pw_name, 1);
+	setenv("USERNAME", pwd->pw_name, 1);
+	setenv("HOME", pwd->pw_dir, 1);
+	setenv("SHELL", pwd->pw_shell, 1);
+
+	if (setresgid(gid, gid, gid) < 0) {
+		goto errout;
+	}
+
+	if (initgroups(pwd->pw_name, gid) < 0) {
+		goto errout;
+	}
+
+	if (setresuid(uid, uid, uid) < 0) {
+		goto errout;
+	}
+
+
+
+	return 0;
+errout:
+	return 1;
+
+}
+
 int injection_check(int argc, char *argv[])
 {
 	char *inject_char[] = {";", "|", "`", "$(", "&&", "||", ">", "<"};
@@ -164,15 +202,29 @@ int injection_check(int argc, char *argv[])
 	return 0;
 }
 
-void run_process(int argc, char *argv[]) 
+void run_process(struct jailed_cmd_cmd *cmd_cmd) 
 {
 	char cmd_name[PATH_MAX];
 	char cmd_path[PATH_MAX];
 	char prog[PATH_MAX];
 	int len = 0;
+	int i = 0;
+	int argc = cmd_cmd->argc;
+	char *argv[argc + 1];
+		
+	/*  get args to standard parameter: argc, argv[] */
+	for (i = 0; i < cmd_cmd->argc; i++) {
+		argv[i] = cmd_cmd->argvs + len;
+		len += strlen(cmd_cmd->argvs + len) + 1;
+	}
+	argv[i] = 0;
 
 	if (injection_check(argc, argv)) {
 		errno = EINVAL;
+		goto errout;
+	}
+
+	if (set_uid_gid(cmd_cmd)) {
 		goto errout;
 	}
 
@@ -186,6 +238,7 @@ void run_process(int argc, char *argv[])
 	if (chdir("/tmp") < 0) {
 		goto errout;
 	}
+	printf("%s\n", cmd_path);
 
 	len = readlink(cmd_path, prog, sizeof(prog));
 	if (len < 0) {
@@ -201,18 +254,7 @@ errout:
 
 int start_process(struct jailed_cmd_cmd *cmd_cmd, int *mirror, int *mirror_err)
 {
-	int argc = cmd_cmd->argc;
-	char *argv[argc + 1];
-	int i = 0;
-	int len = 0;
 	int pid = -1;
-	
-	/*  get args to standard parameter: argc, argv[] */
-	for (i = 0; i < cmd_cmd->argc; i++) {
-		argv[i] = cmd_cmd->argvs + len;
-		len += strlen(cmd_cmd->argvs + len) + 1;
-	}
-	argv[i] = 0;
 	
 	if (cmd_cmd->isatty) {
 		/*  if command comes from interactive shell, start a pty term and fork process */
@@ -231,7 +273,8 @@ int start_process(struct jailed_cmd_cmd *cmd_cmd, int *mirror, int *mirror_err)
 			close(*mirror_err);
 		}
 		setenv("TERM", cmd_cmd->term, 1);
-		run_process(argc, argv);
+
+		run_process(cmd_cmd);
 		_exit(1);
 	} 
 
