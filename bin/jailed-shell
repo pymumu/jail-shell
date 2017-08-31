@@ -4,18 +4,38 @@ showhelp()
 {
 	echo "Usage: jailed-shell [OPTION]"
 	echo "Options:"
-	echo ""
+	echo "  -a | --add      add a user to jialed-shell."
+	echo "  -d | --del      del a user from jailed-shell."
+	echo "  -n | --name     jailed-shell name."
+	echo "  -c | --config   config file."
+	echo "  --disable       disable jailed-shell feature."
+	echo "  --enable        enable jailed-shell feature."
+	echo "example:"
+	echo "  add user:  jailed-shell -a user -n \"default\" -c default.cfg"
+	echo "  del user:  jailed-shell -d user"
 }
 
 main()
 {
-	showhelp
+	OPTS=`getopt -o h --long help \
+		-n  "" -- "$@"`
+
+	if [ $? != 0 ] ; then echo "Terminating..." >&2 ; exit 1 ; fi
+
+	# Note the quotes around `$TEMP': they are essential!
+	eval set -- "$OPTS"
+
+	while true; do
+		case "$1" in
+		-h | --help )
+			showhelp
+			return 0
+			shift ;;
+		-- ) shift; break ;;
+		* ) break ;;
+  		esac
+	done
 }
-
-
-
-
-
 
 main $@
 exit $?
