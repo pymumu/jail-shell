@@ -177,8 +177,6 @@ int set_uid_gid(struct jailed_cmd_cmd *cmd_cmd)
 		goto errout;
 	}
 
-
-
 	return 0;
 errout:
 	return 1;
@@ -219,11 +217,13 @@ void run_process(struct jailed_cmd_cmd *cmd_cmd)
 	}
 	argv[i] = 0;
 
+	/*  check shell inject characters */
 	if (injection_check(argc, argv)) {
 		errno = EINVAL;
 		goto errout;
 	}
 
+	/*  change user id */
 	if (set_uid_gid(cmd_cmd)) {
 		goto errout;
 	}
@@ -238,7 +238,6 @@ void run_process(struct jailed_cmd_cmd *cmd_cmd)
 	if (chdir("/tmp") < 0) {
 		goto errout;
 	}
-	printf("%s\n", cmd_path);
 
 	len = readlink(cmd_path, prog, sizeof(prog));
 	if (len < 0) {
