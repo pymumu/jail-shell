@@ -4,6 +4,7 @@
 
 #define _BSD_SOURCE
 #include "jailed-cmd.h"
+#define JAILED_CMD "jailed-cmd"
 
 int window_size_changed = 0;
 int is_term_mode_change = 0;
@@ -490,15 +491,8 @@ void signal_handler(int sig)
 
 int main(int argc, char *argv[])
 {
-	struct stat buf;
-
-	if (lstat(argv[0], &buf) != 0) {
-		fprintf(stderr, "Get stat for %s failed, %s\n", argv[0], strerror(errno));
-		return 1;
-	}
-
 	/*  if command is not executed from symbol link, the arg[1] is the command will being executed */
-	if (!S_ISLNK(buf.st_mode)) {
+	if (strncmp(basename(argv[0]), JAILED_CMD, PATH_MAX) == 0) {
 		argc -= 1;
 		argv++;
 		
