@@ -4,12 +4,10 @@
 #
 
 JAIL_ROOT_DIR=/var/run/jail-shell
-
 CONF_PATH=/etc/jailed-shell/jail-config
-
-JAIL_SHELL_HOME=/usr/local/jailed-shell/
-
+JAIL_SHELL_HOME=/usr/local/jailed-shell
 JAILED_CMD=/usr/bin/jailed-cmd
+ELF_FILE_LIST="`mktemp`"
 
 showhelp()
 {
@@ -18,6 +16,58 @@ showhelp()
 	echo "  --list        list jail names."
 	echo "  --setup       setup jailed-shell."
 	echo "-h, --help      show this help message."
+}
+
+link_cp()
+{
+	local src=$1
+	local target=$2
+	if [ -d "$target" ]; then
+		target="$target/`basename $src`"
+	fi
+
+	ln -f -P $src $target 2>/dev/null
+	if [ $? -eq 0 ]; then
+		return 0
+	fi
+
+	cp -a $1 $2
+}
+
+cp_lib()
+{
+	local LIBS_FILE="${ELF_FILE_LIST}.LIBS"
+	local LIBS_ALL_FILE="${ELF_FILE_LIST}.LIBS_UNIQ"
+	> $LIBS_FILE
+	while read FILE
+	do
+		ldd $FILE >> $LIBS_FILE
+	done < $ELF_FILE_LIST
+
+	sort $LIBS_FILE | grep -v "linux-vdso.so" | awk '{if(NF == 2){print $1}else{print $3}}' | uniq > $LIBS_ALL_FILE
+
+	while read FILE
+	do
+		DIR="`dirname $FILE`"
+		LIB_FILE="$FILE"
+		if [ ! -d "$1/$DIR" ]; then
+			mkdir -m 0755 -p $1/$DIR
+		fi
+		if [ -h "$FILE" ]; then
+			link_cp $FILE $1/$DIR/
+			LIB_FILE="$DIR/`readlink $FILE`"
+		fi
+		DIR="`dirname $LIB_FILE`"
+		link_cp $LIB_FILE $1/$DIR/
+	done < $LIBS_ALL_FILE
+
+	rm -f $LIBS_ALL_FILE
+	rm -f $LIBS_FILE
+}
+
+add_elf_file()
+{
+	echo $1 >> $ELF_FILE_LIST
 }
 
 dir()
@@ -31,6 +81,26 @@ dir()
 	install -o $user -g $group -m $3 -d $1/$2  
 }
 
+clink() 
+{
+	local userinfo="$5"
+	if [ $# -lt 5 ]; then
+		return 1
+	fi
+	user=${userinfo##*:}
+	group=${userinfo#*:}
+	link_cp $2 $1/$3
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+	chmod $4 $1/$3
+	chown $user:$group $1/$3
+
+	if [ -x "$2" ]; then
+		add_elf_file "$1/$3"
+	fi	
+}
+
 hlink()
 {
 	local userinfo="$5"
@@ -39,7 +109,16 @@ hlink()
 	fi
 	user=${userinfo##*:}
 	group=${userinfo#*:}
-	install -o $user -g $group -m $4 $2 $1/$3
+	ln -f -P $2 $1/$3
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+	chmod $4 $1/$3
+	chown $user:$group $1/$3
+
+	if [ -x "$2" ]; then
+		add_elf_file "$1/$3"
+	fi
 }
 
 slink()
@@ -57,6 +136,8 @@ slink()
 lib()
 {
 	echo "add lib $@"
+
+	#add_elf_file "$1/$3"
 }
 
 cmd()
@@ -75,6 +156,7 @@ setup_jail()
 {
 	local jail_name=$1
 	local jail_cfg=$2
+	
 	local n
 
 	if [ -z "$jail_name" ]; then
@@ -84,7 +166,6 @@ setup_jail()
 	if [ ! -f "$jail_cfg" ]; then
 	   return 1
    	fi	
-
 	LINE_NO=0
 	while read CMD ARGS;
 	do
@@ -93,21 +174,32 @@ setup_jail()
 		""|\#*)
 			continue
 			;;
-		dir | hlink | slink | lib | cmd)
+		dir | hlink | slink | clink | lib | cmd)
 			;;
 		*)
-			echo "unknown command"
+			echo "unknown command at line $LINE_NO: $CMD $ARGS"
+			return 1
 			;;
 		esac
 
 		$CMD $JAIL_ROOT_DIR/$jail_name $ARGS
 		if [ $? -ne 0 ]; then
-			echo "command failed at $LINE_NO"
+			echo "command failed at line $LINE_NO: $CMD $ARGS"
 			return 1
 		fi
 	done < $jail_cfg
 
-	hlink $JAIL_ROOT_DIR/$jail_name $JAIL_SHELL_HOME/jailed-cmd/jailed-cmd $JAILED_CMD 0755 root:root
+	clink $JAIL_ROOT_DIR/$jail_name $JAIL_SHELL_HOME/jailed-cmd/jailed-cmd $JAILED_CMD 0755 root:root
+	if [ $? -ne 0 ]; then
+		echo "copy jailed-cmd failed."
+		return 1
+	fi
+
+	cp_lib $JAIL_ROOT_DIR/$jail_name
+	if [ $? -ne 0 ]; then
+		echo "copy lib failed."
+		return 1
+	fi
 }
 
 setup_jails()
@@ -159,4 +251,6 @@ main()
 }
 
 main $@
-exit $?
+ret=$?
+rm -fr $ELF_FILE_LIST
+exit $ret
