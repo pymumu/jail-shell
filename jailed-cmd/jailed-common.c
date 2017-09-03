@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) 2017 Ruilin Peng (Nick) <pymumu@gmail.com>
+ */
+
 #include "jailed-cmd.h"
 
 void set_sock_opt(int sock)

@@ -1,3 +1,6 @@
+/*
+ * Copyright (C) 2017 Ruilin Peng (Nick) <pymumu@gmail.com>
+ */
 
 #ifndef _JAILED_CMD_
 #define _JAILED_CMD_

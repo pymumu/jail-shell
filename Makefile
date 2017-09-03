@@ -24,15 +24,17 @@ PAM_CHROOT:
 	$(MAKE) -C $(PAM_CHROOT_DIR) all
 
 install: all
-	@install -d $(JAILED_HOME_DIR)/command $(JAILED_HOME_DIR)/jailed-cmd/ $(JAILED_CONF_DIR) $(JAILED_HOME_DIR)/rootfs
+	@install -d $(JAILED_HOME_DIR)/command $(JAILED_HOME_DIR)/jailed-cmd/ $(JAILED_CONF_DIR)/jail-config $(JAILED_CONF_DIR) $(JAILED_HOME_DIR)/rootfs
 	@install -d $(JAILED_HOME_DIR)/bin 
 	@install -t $(JAILED_HOME_DIR)/jailed-cmd/ jailed-cmd/jailed-cmd jailed-cmd/jailed-cmdd -m 0755
 	@install -t $(JAILED_HOME_DIR)/bin bin/jailed-shell -m 0755
+	@install -t $(JAILED_HOME_DIR)/bin bin/jailed-shell-setup -m 0755
 	#@install -t $(PAM_DIR) pam_chroot/pam_chroot.so -m 0755
 	@ln -f -s /usr/local/jailed-shell/jailed-cmd/jailed-cmdd $(PREFIX)/usr/sbin/jailed-cmdd 
 	@ln -f -s /usr/local/jailed-shell/bin/jailed-shell $(PREFIX)/usr/sbin/jailed-shell
 	@install -t $(JAILED_INIT_DIR) etc/init.d/jailed-shell -m 0755
 	@install -t $(JAILED_CONF_DIR) etc/jailed-shell/cmd_config etc/jailed-shell/cmdd_config -m 640
+	@install -t $(JAILED_CONF_DIR)/jail-config etc/jailed-shell/jail-config/default-jail.cfg -m 640
 
 uninstall:
 	$(RM) -r $(JAILED_HOME_DIR)

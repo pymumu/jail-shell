@@ -1,0 +1,162 @@
+#!/bin/sh
+#
+# Copyright (C) 2017 Ruilin Peng (Nick) <pymumu@gmail.com>
+#
+
+JAIL_ROOT_DIR=/var/run/jail-shell
+
+CONF_PATH=/etc/jailed-shell/jail-config
+
+JAIL_SHELL_HOME=/usr/local/jailed-shell/
+
+JAILED_CMD=/usr/bin/jailed-cmd
+
+showhelp()
+{
+	echo "Usage: jailed-shell-setup [OPTION]"
+	echo "Options:"
+	echo "  --list        list jail names."
+	echo "  --setup       setup jailed-shell."
+	echo "-h, --help      show this help message."
+}
+
+dir()
+{
+	local userinfo="$4"
+	if [ $# -lt 4 ]; then
+		return 1
+	fi
+	user=${userinfo##*:}
+	group=${userinfo#*:}
+	install -o $user -g $group -m $3 -d $1/$2  
+}
+
+hlink()
+{
+	local userinfo="$5"
+	if [ $# -lt 5 ]; then
+		return 1
+	fi
+	user=${userinfo##*:}
+	group=${userinfo#*:}
+	install -o $user -g $group -m $4 $2 $1/$3
+}
+
+slink()
+{
+	local userinfo="$4"
+	if [ $# -lt 3 ]; then
+		return 1
+	fi
+	user=${userinfo##*:}
+	group=${userinfo#*:}
+
+	ln -f -s $2 $1/$3
+}
+
+lib()
+{
+	echo "add lib $@"
+}
+
+cmd()
+{
+	local userinfo="$5"
+	if [ $# -lt 5 ]; then
+		return 1
+	fi
+	user=${userinfo##*:}
+	group=${userinfo#*:}
+
+	ln -f -s $JAILED_CMD $1$2
+}
+
+setup_jail()
+{
+	local jail_name=$1
+	local jail_cfg=$2
+	local n
+
+	if [ -z "$jail_name" ]; then
+		return 1
+	fi
+
+	if [ ! -f "$jail_cfg" ]; then
+	   return 1
+   	fi	
+
+	LINE_NO=0
+	while read CMD ARGS;
+	do
+		LINE_NO=$((LINE_NO+1))
+		case "$CMD" in
+		""|\#*)
+			continue
+			;;
+		dir | hlink | slink | lib | cmd)
+			;;
+		*)
+			echo "unknown command"
+			;;
+		esac
+
+		$CMD $JAIL_ROOT_DIR/$jail_name $ARGS
+		if [ $? -ne 0 ]; then
+			echo "command failed at $LINE_NO"
+			return 1
+		fi
+	done < $jail_cfg
+
+	hlink $JAIL_ROOT_DIR/$jail_name $JAIL_SHELL_HOME/jailed-cmd/jailed-cmd $JAILED_CMD 0755 root:root
+}
+
+setup_jails()
+{
+	for JAIL_CFG in `ls $CONF_PATH/*.cfg 2>/dev/null`
+	do
+		JAIL_NAME="`basename $JAIL_CFG .cfg`"
+		setup_jail "$JAIL_NAME" "$JAIL_CFG"
+	done
+}
+
+list_jail() 
+{
+	for JAIL_CFG in `ls $CONF_PATH/*.cfg 2>/dev/null`
+	do
+		JAIL_NAME="`basename $JAIL_CFG .cfg`"
+		echo "$JAIL_NAME"
+	done	
+}
+
+main()
+{
+	OPTS=`getopt -o h --long help,setup,list \
+		-n  "" -- "$@"`
+
+	if [ $? != 0 ] ; then echo "Terminating..." >&2 ; exit 1 ; fi
+
+	# Note the quotes around `$OPTS': they are essential!
+	eval set -- "$OPTS"
+
+	while true; do
+		case "$1" in
+		-h | --help )
+			showhelp
+			return $!
+			shift ;;
+		--setup )
+			setup_jails
+			return $?
+			shift ;;
+		--list )
+			list_jail
+			return 0
+			;;
+		-- ) shift; break ;;
+		* ) break ;;
+  		esac
+	done
+}
+
+main $@
+exit $?
