@@ -6,6 +6,8 @@
 JAIL_ROOT_DIR=/var/run/jail-shell
 CONF_PATH=/etc/jailed-shell/jail-config
 JAIL_SHELL_HOME=/usr/local/jailed-shell
+COMMAND_PATH=$JAIL_SHELL_HOME/command
+JAIL_COMMAND_PATH=
 JAILED_CMD=/usr/bin/jailed-cmd
 ELF_FILE_LIST="`mktemp`"
 
@@ -26,7 +28,7 @@ link_cp()
 		target="$target/`basename $src`"
 	fi
 
-	ln -f -P $src $target 2>/dev/null
+	ln -f $src $target 2>/dev/null
 	if [ $? -eq 0 ]; then
 		return 0
 	fi
@@ -87,6 +89,20 @@ clink()
 	if [ $# -lt 5 ]; then
 		return 1
 	fi
+
+	if [ -h "$2" ]; then
+		LINKED_FILE="`readlink $2`"
+		cp -a $2 $1/$2
+		if [ $? -ne 0 ]; then
+			return 1
+		fi
+		if [ "`basename $LINKED_FILE`" = "$LINKED_FILE" ]; then
+			DIR="`dirname $2`"
+			LINKED_FILE="$DIR/$LINKED_FILE"
+		fi
+		clink $1 $LINKED_FILE $LINKED_FILE $4 $5
+		return $?
+	fi
 	user=${userinfo##*:}
 	group=${userinfo#*:}
 	link_cp $2 $1/$3
@@ -109,7 +125,7 @@ hlink()
 	fi
 	user=${userinfo##*:}
 	group=${userinfo#*:}
-	ln -f -P $2 $1/$3
+	ln -f $2 $1/$3
 	if [ $? -ne 0 ]; then
 		return 1
 	fi
@@ -135,9 +151,7 @@ slink()
 
 lib()
 {
-	echo "add lib $@"
-
-	#add_elf_file "$1/$3"
+	clink $@
 }
 
 cmd()
@@ -150,6 +164,15 @@ cmd()
 	group=${userinfo#*:}
 
 	ln -f -s $JAILED_CMD $1$2
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+
+	LINK_NAME="`basename $2`"
+	ln -f -s $3 $JAIL_COMMAND_PATH/$LINK_NAME
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
 }
 
 setup_jail()
@@ -166,6 +189,10 @@ setup_jail()
 	if [ ! -f "$jail_cfg" ]; then
 	   return 1
    	fi	
+
+	JAIL_COMMAND_PATH=$COMMAND_PATH/$jail_name
+	mkdir $JAIL_COMMAND_PATH
+
 	LINE_NO=0
 	while read CMD ARGS;
 	do
