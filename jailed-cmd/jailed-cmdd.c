@@ -905,7 +905,21 @@ errout:
 
 void onexit(void) 
 {
+	
 	unlink(PID_FILE_PATH);	
+}
+
+void signal_handler(int sig)
+{
+	switch(sig) {
+	case SIGTERM: 
+	case SIGINT:
+	case SIGABRT:
+	case SIGQUIT:
+		onexit();
+		_exit(1);
+		break;
+	}
 }
 
 int main(int argc, char *argv[])
@@ -939,6 +953,10 @@ int main(int argc, char *argv[])
 	/*  ignore SIGCHLD, child will be recycled automatically */
 	signal(SIGCHLD, SIG_IGN);
 	signal(SIGPIPE, SIG_IGN);
+	signal(SIGTERM, signal_handler);
+	signal(SIGINT, signal_handler);
+	signal(SIGQUIT, signal_handler);
+	signal(SIGABRT, signal_handler);
 
 	return run_server(config.port);
 }
