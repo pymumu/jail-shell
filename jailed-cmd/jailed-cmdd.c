@@ -903,6 +903,11 @@ errout:
 	return 1;
 }
 
+void onexit(void) 
+{
+	unlink(PID_FILE_PATH);	
+}
+
 int main(int argc, char *argv[])
 {
 	int opt;
@@ -928,6 +933,8 @@ int main(int argc, char *argv[])
 	if (create_pid_file(PID_FILE_PATH) != 0) {
 		//return 1;	
 	}
+
+	atexit(onexit);
 
 	/*  ignore SIGCHLD, child will be recycled automatically */
 	signal(SIGCHLD, SIG_IGN);
