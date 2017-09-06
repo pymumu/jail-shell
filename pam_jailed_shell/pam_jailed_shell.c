@@ -8,14 +8,18 @@
 #include <errno.h>
 #include <unistd.h>
 #include <pwd.h>
+#include <grp.h>
 #include <signal.h>
 #include <sched.h>
 #include <sys/mount.h>
+#include <linux/fs.h>
 #include <linux/capability.h>
 
 #define  PAM_SM_SESSION
 #include <security/pam_modules.h>
 #include <sys/prctl.h>
+
+#define MAX_GROUP_NUM  32
 
 #ifndef PAM_EXTERN
 #define PAM_EXTERN
@@ -27,12 +31,17 @@ struct cap_drop_struct {
 	int isdrop;
 };
 
+/*  for cap details, please read (man capabilities) */
 struct cap_drop_struct cap_drop[] = 
 {
 	{"CAP_AUDIT_CONTROL",    CAP_AUDIT_CONTROL,    1},
+#ifdef CAP_AUDIT_READ
 	{"CAP_AUDIT_READ",       CAP_AUDIT_READ,       1},
+#endif
 	{"CAP_AUDIT_WRITE",      CAP_AUDIT_WRITE,      1},
-	/* {"CAP_BLOCK_SUSPEND",    CAP_BLOCK_SUSPEND,    1}, */
+#ifdef CAP_BLOCK_SUSPEND
+	{"CAP_BLOCK_SUSPEND",    CAP_BLOCK_SUSPEND,    1},
+#endif	
 	{"CAP_CHOWN",            CAP_CHOWN,            0},
 	{"CAP_DAC_OVERRIDE",     CAP_DAC_OVERRIDE,     1},
 	{"CAP_DAC_READ_SEARCH",  CAP_DAC_READ_SEARCH,  1},
@@ -65,8 +74,12 @@ struct cap_drop_struct cap_drop[] =
 	{"CAP_SYS_RESOURCE",     CAP_SYS_RESOURCE,     1},
 	{"CAP_SYS_TIME",         CAP_SYS_TIME,         1},
 	{"CAP_SYS_TTY_CONFIG",   CAP_SYS_TTY_CONFIG,   0},
+#ifdef CAP_SYSLOG
 	{"CAP_SYSLOG",           CAP_SYSLOG,           0},
-	/* {"CAP_WAKE_ALARM",       CAP_WAKE_ALARM,       0},*/
+#endif
+#ifdef CAP_WAKE_ALARM
+	{"CAP_WAKE_ALARM",       CAP_WAKE_ALARM,       0},
+#endif
 };
 
 int cap_drop_size = sizeof(cap_drop) / sizeof(struct cap_drop_struct);
@@ -87,6 +100,7 @@ int load_config(void)
 
 int unshare_pid(void) 
 {
+#ifdef CLONE_NEWPID
 	int unshare_err = unshare(CLONE_NEWPID | CLONE_NEWNS);
 	if (unshare_err) {
 		return PAM_SESSION_ERR;
@@ -103,7 +117,7 @@ int unshare_pid(void)
 		select(1, 0, 0, 0, 0);
 		exit(0);
 	}
-
+#endif
 	return PAM_SUCCESS;
 }
 
@@ -121,7 +135,50 @@ int drop_cap(void)
 			continue;
 		}
 
+		if (prctl(PR_CAPBSET_DROP, cap_drop[i].cap, 0, 0) < 0) {
+			pam_log("Drop %s failed, errno %s\n", cap_drop[i].capname, strerror(errno));
+			continue;
+		}
+
 	}
+	return PAM_SUCCESS;
+}
+
+
+int get_user(pam_handle_t *pamh) 
+{
+	struct passwd *pwd;
+	struct group *gr;
+	const char *user;
+	int ret;
+	gid_t groups[MAX_GROUP_NUM];
+	int ngroups = MAX_GROUP_NUM;
+
+	ret = pam_get_user(pamh, &user, NULL);
+	if (ret != PAM_SUCCESS) {
+		return PAM_USER_UNKNOWN;
+	}
+
+	pwd = getpwnam(user);
+	if (pwd == NULL) {
+		return PAM_USER_UNKNOWN;
+	}
+
+	pam_log("user = %s\n", user);
+	if (getgrouplist(user, pwd->pw_gid, groups, &ngroups) < 0) {
+		return PAM_USER_UNKNOWN;
+	}
+
+	int i;
+	for (i = 0; i < ngroups; i++) {
+		printf("%d. ", groups[i]);
+		gr = getgrgid(groups[i]);
+		if (gr) {
+			printf("%s", gr->gr_name);
+		}
+		printf("\n");
+	}
+
 	return PAM_SUCCESS;
 }
 

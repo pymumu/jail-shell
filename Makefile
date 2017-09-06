@@ -21,13 +21,13 @@ SECURITY_DIR=$(LIB_DIR)/security
 all: JAILED_CMD PAM_CHROOT PAM_JAILED_SHELL
 
 JAILED_CMD: 
-	$(MAKE) -C $(JAILED_CMD_DIR) all
+	$(MAKE) -C $(JAILED_CMD_DIR) $(MAKEFLAGS) all
 
 PAM_CHROOT: 
-	$(MAKE) -C $(PAM_CHROOT_DIR) all
+	$(MAKE) -C $(PAM_CHROOT_DIR) $(MAKEFLAGS) all
 
 PAM_JAILED_SHELL: 
-	$(MAKE) -C $(PAM_JAILED_SHELL_DIR) all
+	$(MAKE) -C $(PAM_JAILED_SHELL_DIR) $(MAKEFLAGS) all
 
 install: all
 	@install -v -d $(JAILED_HOME_DIR)/command $(JAILED_HOME_DIR)/jailed-cmd/ $(JAILED_CONF_DIR)/jail-config $(JAILED_CONF_DIR) $(JAILED_HOME_DIR)/rootfs
@@ -37,6 +37,7 @@ install: all
 	@install -v -t $(JAILED_HOME_DIR)/bin bin/jailed-shell-setup -m 0755
 	@install -v -t $(SECURITY_DIR) pam_chroot/pam_chroot.so -m 0755
 	@install -v -t $(SECURITY_DIR) pam_jailed_shell/pam_jailed_shell.so -m 0755
+	@install -v -t /etc/security pam_jailed_shell/jailed-shell.conf -m 0600
 	@ln -v -f -s /usr/local/jailed-shell/jailed-cmd/jailed-cmdd $(PREFIX)/usr/sbin/jailed-cmdd 
 	@ln -v -f -s /usr/local/jailed-shell/bin/jailed-shell $(PREFIX)/usr/sbin/jailed-shell
 	@install -v -t $(JAILED_INIT_DIR) etc/init.d/jailed-shell -m 0755
@@ -51,6 +52,7 @@ uninstall:
 	$(RM) $(PREFIX)/usr/sbin/jailed-shell
 	$(RM) $(SECURITY_DIR)/pam_chroot.so
 	$(RM) $(SECURITY_DIR)/pam_jailed_shell.so
+	$(RM) /etc/security/jailed-shell.conf
 
 clean:
 	$(MAKE) -C $(JAILED_CMD_DIR) clean
