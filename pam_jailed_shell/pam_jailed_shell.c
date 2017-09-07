@@ -25,6 +25,22 @@
 #define PAM_EXTERN
 #endif
 
+#define JAIL_CONF_PATH "/etc/security/jailed-shell.conf"
+
+#define MAX_LINE_LEN      4096
+#define MAX_USER_INFO_LEN 4096
+#define MAX_FIELD_LEN     1024
+#define JAIL_HOME_CONFIG  "JAIL_HOME"
+struct user_jail_struct {
+	char name[MAX_FIELD_LEN];
+	char jail[MAX_FIELD_LEN];
+	int pid_namespace;
+};
+
+struct user_jail_struct user_jail[MAX_USER_INFO_LEN];
+int user_jail_number;
+char jail_home[MAX_FIELD_LEN];
+
 struct cap_drop_struct {
 	char *capname;
 	unsigned int cap;
@@ -93,11 +109,53 @@ void pam_log(const char *format, ...)
 	va_end(args);
 }
 
-int load_config(void) 
+int load_config(void)
 {
+	FILE *fp;
+	char line[MAX_LINE_LEN];
+	char filed1[MAX_FIELD_LEN];
+	char filed2[MAX_FIELD_LEN];
+	char filed3[MAX_FIELD_LEN];
+	int filedNum = 0;
+
+	fp = fopen(JAIL_CONF_PATH, "r");
+	if (fp == NULL) {
+		return 1;
+	}
+
+	while (fgets(line, MAX_LINE_LEN, fp)) {
+		filedNum = sscanf(line, "%1024s %1024s %1024s", filed1, filed2, filed3);
+		if (filedNum < 0) {
+			continue;
+		}
+
+		if (filedNum == 2) {
+			if (strncmp(filed1, JAIL_HOME_CONFIG, sizeof(filed1) != 0)) {
+				continue;
+			}
+			strncpy(jail_home, filed2, MAX_FIELD_LEN);
+		} else if (filedNum == 3) {
+			struct user_jail_struct *info;
+			int value;
+			if (filed1[0] == '#') {
+				continue;
+			}
+			info = &user_jail[user_jail_number];
+			strncpy(info->name, filed1, MAX_FIELD_LEN);
+			strncpy(info->jail, filed2, MAX_FIELD_LEN);
+			value = atoi(filed3);
+			if (value) {
+				info->pid_namespace = 1;
+			} else {
+				info->pid_namespace = 0;
+			}
+			user_jail_number++;
+		}
+	}
+
+	fclose(fp);
 	return PAM_SUCCESS;
 }
-
 int unshare_pid(void) 
 {
 #ifdef CLONE_NEWPID
@@ -109,6 +167,7 @@ int unshare_pid(void)
 	int pid = fork();
 	if (pid == 0) {
 		/*  remount proc directory */
+		mount("none", "/", NULL, MS_REC|MS_PRIVATE, NULL);
 		mount("none", "/proc", NULL, MS_REC|MS_PRIVATE, NULL);
 		mount("proc", "/proc", "proc", MS_NOSUID|MS_NOEXEC|MS_NODEV, NULL);
 		/*  send kill to child when parent exit. */

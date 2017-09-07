@@ -52,14 +52,17 @@ cp_lib()
 	do
 		DIR="`dirname $FILE`"
 		LIB_FILE="$FILE"
+		if [ -h "$FILE" ]; then
+			if [ ! -d "$1/$DIR" ]; then
+				mkdir -m 0755 -p $1/$DIR
+			fi
+			link_cp $FILE $1/$DIR/
+			LIB_FILE="`readlink -e $FILE`"
+		fi
+		DIR="`dirname $LIB_FILE`"
 		if [ ! -d "$1/$DIR" ]; then
 			mkdir -m 0755 -p $1/$DIR
 		fi
-		if [ -h "$FILE" ]; then
-			link_cp $FILE $1/$DIR/
-			LIB_FILE="$DIR/`readlink $FILE`"
-		fi
-		DIR="`dirname $LIB_FILE`"
 		link_cp $LIB_FILE $1/$DIR/
 	done < $LIBS_ALL_FILE
 
@@ -106,14 +109,10 @@ clink()
 	fi
 
 	if [ -h "$2" ]; then
-		LINKED_FILE="`readlink $2`"
+		LINKED_FILE="`readlink -e $2`"
 		cp -a $2 $1/$2
 		if [ $? -ne 0 ]; then
 			return 1
-		fi
-		if [ "`basename $LINKED_FILE`" = "$LINKED_FILE" ]; then
-			DIR="`dirname $2`"
-			LINKED_FILE="$DIR/$LINKED_FILE"
 		fi
 		clink $1 $LINKED_FILE $LINKED_FILE
 		return $?
@@ -175,6 +174,7 @@ setup_jail()
 {
 	local jail_name=$1
 	local jail_cfg=$2
+	local cp_cmd=0
 	
 	if [ -z "$jail_name" ]; then
 		return 1
@@ -195,7 +195,10 @@ setup_jail()
 		""|\#*)
 			continue
 			;;
-		dir | file | hlink | slink | clink | cmd)
+		dir | file | hlink | slink | clink)
+			;;
+		cmd)
+			cp_cmd=1
 			;;
 		*)
 			echo "unknown command at line $LINE_NO: $CMD $ARGS"
@@ -210,10 +213,12 @@ setup_jail()
 		fi
 	done < $jail_cfg
 
-	clink $JAIL_ROOT_DIR/$jail_name $JAIL_SHELL_HOME/jailed-cmd/jailed-cmd $JAILED_CMD 
-	if [ $? -ne 0 ]; then
-		echo "copy jailed-cmd failed."
-		return 1
+	if [ $cp_cmd -eq 1 ]; then
+		clink $JAIL_ROOT_DIR/$jail_name $JAIL_SHELL_HOME/jailed-cmd/jailed-cmd $JAILED_CMD 
+		if [ $? -ne 0 ]; then
+			echo "copy jailed-cmd failed."
+			return 1
+		fi
 	fi
 
 	cp_lib $JAIL_ROOT_DIR/$jail_name

@@ -2,7 +2,6 @@
  * Copyright (C) 2017 Ruilin Peng (Nick) <pymumu@gmail.com>
  */
 
-#define _BSD_SOURCE
 #include "jailed-cmd.h"
 #define JAILED_CMD "jailed-cmd"
 
