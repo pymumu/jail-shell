@@ -68,7 +68,7 @@ int create_pid_file(const char *pid_file)
 	fd = open(pid_file, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
 	if (fd == -1) {
 		fprintf(stderr, "create pid file failed, %s", strerror(errno));
-		return 1;
+		return -1;
 	}
 
 	flags = fcntl(fd, F_GETFD); 
@@ -100,7 +100,7 @@ errout:
 	if (fd > 0) {
 		close(fd);
 	}
-	return 1;
+	return -1;
 }
 
 /*  fork process and create socketpair to stdin, stdout, stderr for data writing and reading */
@@ -944,7 +944,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if (create_pid_file(PID_FILE_PATH) != 0) {
+	if (create_pid_file(PID_FILE_PATH) < 0) {
 		//return 1;	
 	}
 
