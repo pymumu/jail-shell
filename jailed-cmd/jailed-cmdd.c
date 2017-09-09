@@ -204,7 +204,7 @@ int injection_check(int argc, char *argv[])
 	return 0;
 }
 
-void run_process(struct jailed_cmd_cmd *cmd_cmd) 
+void run_process(struct jailed_cmd_cmd *cmd_cmd, char *jail_name) 
 {
 	char cmd_name[PATH_MAX];
 	char cmd_path[PATH_MAX];
@@ -237,7 +237,7 @@ void run_process(struct jailed_cmd_cmd *cmd_cmd)
 		goto errout;
 	}
 
-	snprintf(cmd_path, PATH_MAX, "%s%s", config.rootdir, cmd_name);
+	snprintf(cmd_path, PATH_MAX, "%s/%s%s", config.rootdir, jail_name, cmd_name);
 
 	if (chdir("/tmp") < 0) {
 		goto errout;
@@ -255,10 +255,92 @@ errout:
 	fprintf(stderr, "-sh: %s: %s\n", argv[0], strerror(errno));
 }
 
+int get_jail_name(struct jailed_cmd_cmd *cmd_cmd, char *out, int out_max_len)
+{
+	struct passwd *pwd;
+	char jsid_file_path[PATH_MAX];
+	char buff[MAX_LINE_LEN];
+	FILE *fp = NULL;
+	int len;
+
+	pwd = getpwuid(cmd_cmd->uid);
+	if (pwd == NULL) {
+		fprintf(stderr, "User is invalid.\n");
+		goto errout;
+	}
+
+	snprintf(jsid_file_path, PATH_MAX, JAIL_JSID_FILE, pwd->pw_name);
+	fp = fopen(jsid_file_path, "r");
+	if (fp == NULL) {
+		fprintf(stderr, "open %s failed, %s\n", jsid_file_path, strerror(errno));
+		goto errout;
+	}
+
+	/*  read GSID */
+	if (fgets(buff, sizeof(buff) - 1, fp) == NULL) {
+		fprintf(stderr, "read gsid failed, %s\n", strerror(errno));
+		goto errout;
+	}
+	len = strnlen(buff, sizeof(buff) - 1);
+	if (buff[len - 1] == '\n') {
+		buff[len - 1] = '\0';
+	}	
+
+	/*  check GSID */
+	if (strncmp(buff, cmd_cmd->jsid, TMP_BUFF_LEN_32) != 0) {
+		fprintf(stderr, "gsid not match, %s:%s\n", buff, cmd_cmd->jsid);
+		goto errout;
+	}
+
+	/*  read user name */
+	if (fgets(buff, sizeof(buff) - 1, fp) == NULL) {
+		fprintf(stderr, "read gsid failed, %s\n", strerror(errno));
+		goto errout;
+	}
+	len = strnlen(buff, sizeof(buff) - 1);
+	if (buff[len - 1] == '\n') {
+		buff[len - 1] = '\0';
+	}	
+
+	/*  check user name */
+	if (strncmp(buff, pwd->pw_name, MAX_LINE_LEN) != 0) {
+		fprintf(stderr, "user name not match, %s:%s\n", buff, pwd->pw_name);
+		goto errout;
+	}
+	
+	/*  read jail name */	
+	if (fgets(out, out_max_len - 1, fp) == NULL) {
+		fprintf(stderr, "read gsid failed, %s\n", strerror(errno));
+		goto errout;
+	}
+	len = strnlen(out, out_max_len - 1);
+	if (out[len - 1] == '\n') {
+		out[len - 1] = '\0';
+	}	
+
+	if (strlen(out) <= 0) {
+		fprintf(stderr, "jaiel name is invalid, %s", out);
+		goto errout;
+	}
+	
+	fclose(fp);
+	return 0;
+errout:
+	if (fp) {
+		fclose(fp);
+	}
+	return -1;
+}
+
 int start_process(struct jailed_cmd_cmd *cmd_cmd, int *mirror, int *mirror_err)
 {
 	int pid = -1;
+	char jail_name[MAX_LINE_LEN]={0};
 	
+	if (get_jail_name(cmd_cmd, jail_name, sizeof(jail_name)) != 0) {
+		return -1;
+	}
+
 	if (cmd_cmd->isatty) {
 		/*  if command comes from interactive shell, start a pty term and fork process */
 		pid = forkpty(mirror, NULL, NULL, &cmd_cmd->ws);
@@ -277,7 +359,7 @@ int start_process(struct jailed_cmd_cmd *cmd_cmd, int *mirror, int *mirror_err)
 		}
 		setenv("TERM", cmd_cmd->term, 1);
 
-		run_process(cmd_cmd);
+		run_process(cmd_cmd, jail_name);
 		_exit(1);
 	} 
 

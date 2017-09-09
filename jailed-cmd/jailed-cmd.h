@@ -44,6 +44,10 @@
 	(void) (&_max1 == &_max2);		\
 	_max1 > _max2 ? _max1 : _max2; })
 
+#define JAIL_KEY          "JSID"
+#define JAIL_JSID_FILE "/var/run/jailed-shell/jsid-%s"
+#define MAX_LINE_LEN    1024
+
 typedef enum CMD_MSG_TYPE {
 	CMD_MSG_CMD        = 1,
 	CMD_MSG_DATA_IN    = 2,
@@ -74,6 +78,7 @@ struct jailed_cmd_cmd {
 	uid_t uid;
 	uid_t gid;
 	int isatty;
+	char jsid[TMP_BUFF_LEN_32];
 	char term[TMP_BUFF_LEN_32];
 	struct winsize ws;
 	int argc;

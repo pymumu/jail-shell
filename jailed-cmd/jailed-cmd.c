@@ -83,6 +83,7 @@ int cmd_init(struct cmd_context *context, int argc, char *argv[])
 	cmd->uid = geteuid();
 	cmd->gid = getegid();
 	cmd->isatty = is_atty;
+	strncpy(cmd->jsid, getenv(JAIL_KEY), sizeof(cmd->jsid));
 	if (cmd->isatty) {
 		/*  send term name to server */
 		if (getenv("TERM") != NULL) {

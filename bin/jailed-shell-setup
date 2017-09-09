@@ -100,7 +100,7 @@ file()
 	fi
 
 	chown $user:$group $1/$3
-
+	chmod $4 $1/$3
 	add_elf_file "$1/$3"
 }
 
