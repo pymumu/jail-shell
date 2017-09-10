@@ -3,13 +3,25 @@
 # Copyright (C) 2017 Ruilin Peng (Nick) <pymumu@gmail.com>
 #
 
-JAIL_ROOT_DIR=/var/run/jail-shell
+JAIL_ROOT_DIR=
 CONF_PATH=/etc/jailed-shell/jail-config
 JAIL_SHELL_HOME=/usr/local/jailed-shell
 COMMAND_PATH=$JAIL_SHELL_HOME/command
 JAIL_COMMAND_PATH=
 JAILED_CMD=/usr/bin/jailed-cmd
 ELF_FILE_LIST="`mktemp`"
+JAILED_SHELL_CONF=/etc/security/jailed-shell.conf
+
+get_root_dir()
+{
+	JAIL_ROOT_DIR="`grep "^ *JAIL_HOME" $JAILED_SHELL_CONF | awk '{print $2}'`"
+	
+	if [ -z "$JAIL_ROOT_DIR" ]; then
+		return 1
+	fi
+
+	return 0;
+}
 
 showhelp()
 {
@@ -99,8 +111,6 @@ file()
 		return 1
 	fi
 
-	chown $user:$group $1/$3
-	chmod $4 $1/$3
 	add_elf_file "$1/$3"
 }
 
@@ -256,6 +266,12 @@ main()
 	if [ $# -eq 0 ]; then
 		showhelp
 		return 0
+	fi
+
+	get_root_dir
+	if [ $? -ne 0 ]; then
+		echo "Please config JAIL_HOME path at file '/etc/security/jailed-shell.conf'"
+		return 1
 	fi
 
 	if [ $? != 0 ] ; then echo "Terminating..." >&2 ; exit 1 ; fi

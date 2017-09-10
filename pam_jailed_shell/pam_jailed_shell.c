@@ -1,5 +1,8 @@
-#define _GNU_SOURCE
+/*
+ * Copyright (C) 2017 Ruilin Peng (Nick) <pymumu@gmail.com>
+ */
 
+#define _GNU_SOURCE
 #include <syslog.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +23,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <dirent.h> 
 
 
 #define  PAM_SM_SESSION
@@ -43,6 +47,9 @@
 #define MAX_FIELD_LEN     1024
 #define JAIL_HOME_CONFIG  "JAIL_HOME"
 #define JAIL_KEY          "JSID"
+
+extern char *program_invocation_name;
+
 struct user_jail_struct {
 	char name[MAX_FIELD_LEN];
 	char jail[MAX_FIELD_LEN];
@@ -52,7 +59,6 @@ struct user_jail_struct {
 struct user_jail_struct user_jail[MAX_USER_INFO_LEN];
 int user_jail_number;
 char jail_home[MAX_LINE_LEN];
-int start_wait = 0;
 
 struct cap_drop_struct {
 	char *capname;
@@ -144,6 +150,41 @@ errout:
 		close(rnd_fd);
 	}
 	return -1;
+}
+
+int only_one_process(const char *proc_dir)
+{
+	DIR *dir;
+	struct dirent *dent;
+	int proc_num = 0;
+	char comm_file[PATH_MAX];
+	int is_one_process = 1;
+
+	dir = opendir(proc_dir);
+	if (dir == NULL) {
+		return -1;
+	}	
+
+	while((dent = readdir(dir)) != NULL) {
+		if (dent->d_type != DT_DIR) {
+			continue;
+		}
+
+		snprintf(comm_file, PATH_MAX, "%s/%s/comm", proc_dir, dent->d_name);
+		if (access(comm_file, F_OK) != 0) {
+			continue;
+		}
+		
+		proc_num++;
+		if (proc_num > 1) {
+			is_one_process = 0;
+			break;
+		}
+	}
+
+	closedir(dir);
+
+	return is_one_process;
 }
 
 int load_config(void)
@@ -263,11 +304,6 @@ int do_chroot(const char *path)
 	return 0;
 }
 
-void sig_hander(int sig) 
-{
-	start_wait = 1;
-}
-
 int try_lock_pid(const char *pid_file)
 {
 	int fd;
@@ -305,11 +341,91 @@ errout:
 	return -1;
 }
 
+int mount_proc(const char *root_path)
+{
+	char proc_path[PATH_MAX];
+	char pts_path[PATH_MAX];
+	char check_file[PATH_MAX];
+	struct stat buf;
+
+	snprintf(proc_path, PATH_MAX, "%s/proc", root_path);
+	snprintf(pts_path, PATH_MAX, "%s/dev/pts", root_path);
+
+	mkdir(proc_path, 0555);
+	mkdir(pts_path, 0755);
+
+	mount("none", "/", NULL, MS_REC|MS_PRIVATE, NULL);
+	mount("none", "/proc", NULL, MS_REC|MS_PRIVATE, NULL);
+
+	snprintf(check_file, PATH_MAX, "%s/ptmx", pts_path);
+	if (lstat(check_file, &buf) != 0) {
+		if (mount("devpts", pts_path, "devpts",  MS_NOSUID|MS_NOEXEC, NULL) < 0) {
+			return 1;
+		}
+	}
+
+	/*
+	if (do_chroot(chroot_path) < 0) {
+
+		exit(0);
+	}
+	*/
+	snprintf(check_file, PATH_MAX, "%s/uptime", proc_path);
+	if (lstat(check_file, &buf) != 0) {
+		if (mount("proc", proc_path, "proc", MS_NOSUID|MS_NOEXEC|MS_NODEV, NULL) < 0) {
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
+void set_process_name(const char *user)
+{
+	char prog_name[TMP_BUFF_LEN_32];
+	int fd = 0;
+	int cmd_len = 0;
+	char buff[4096];
+	fd = open("/proc/self/cmdline", O_RDONLY);
+	if (fd < 0) {
+		return;
+	}
+
+	/*  get length of cmdline */
+	cmd_len = read(fd, buff, 4096);
+	if (cmd_len < 0) {
+		close(fd);
+		return;
+	}
+	close(fd);
+
+	/*  zero cmdline */
+	memset(program_invocation_name, 0, cmd_len);
+
+	/*  set comm to init */
+	snprintf(prog_name, TMP_BUFF_LEN_32, "init");
+	prctl(PR_SET_NAME, prog_name, NULL, NULL, NULL); 
+
+	/*  set cmdline to init [user] */
+	snprintf(program_invocation_name,  TMP_BUFF_LEN_32, "init [%s]", user);
+}
+
 void jail_init(struct user_jail_struct *info, const char *user, char *pid_file, const char *chroot_path)
 {
 	int wstat;
 	int i = 0;
 	int fd;
+	int sleep_cnt = 0;
+	int last_proccess = 0;
+	char proc_path[PATH_MAX];
+	int pid_wait;
+
+	snprintf(proc_path, PATH_MAX, "%s/proc", chroot_path);
+
+	/*  remount proc directory */
+	if (mount_proc(chroot_path) != 0) {
+		goto out;
+	}
 
 	fd = open("/dev/null", O_RDWR);
 	close(0);
@@ -326,29 +442,30 @@ void jail_init(struct user_jail_struct *info, const char *user, char *pid_file, 
 		close(i);
 	}
 
+	set_process_name(user);
+
 	fd = try_lock_pid(pid_file);
 	if (fd < 0) {
 		goto out;
 	}
-	signal(SIGUSR2, sig_hander);
-	/*  remount proc directory */
 
-	mount("none", "/", NULL, MS_REC|MS_PRIVATE, NULL);
-	mount("none", "/proc", NULL, MS_REC|MS_PRIVATE, NULL);
-	if (do_chroot(chroot_path) < 0) {
-		exit(0);
-	}
-	mount("proc", "/proc", "proc", MS_NOSUID|MS_NOEXEC|MS_NODEV, NULL);
-	/*  send kill to child when parent exit. */
-	prctl(PR_SET_PDEATHSIG, SIGUSR2);
-	/*  wait until parent process exit. */
-	while (waitpid(-1, &wstat, 0) > 0 || start_wait == 0) {
-		if (start_wait == 1) {
+
+	/*  wait until all process exit, except jail_init process. */
+	while ((pid_wait = waitpid(-1, &wstat, 0)) > 0 || last_proccess == 0) {
+		if (pid_wait > 0) {
 			continue;
 		}
 
+		sleep_cnt++;
 		sleep(1);
+
+		if (sleep_cnt % 15 == 0) {
+			sleep_cnt = 0;
+			last_proccess = only_one_process(proc_path);
+		}
 	}
+
+	unlink(pid_file);
 out:
 	_exit(0);
 }
@@ -362,6 +479,10 @@ int create_jail_ns(struct user_jail_struct *info, const char *user, char *pid_fi
 
 	unshare_err = unshare(CLONE_NEWPID | CLONE_NEWNS);
 	if (unshare_err) {
+		/*  NOT support */
+		if (errno == EINVAL) {
+			return mount_proc(chroot_path);
+		}	
 		return 1;
 	}
 
@@ -423,6 +544,9 @@ int enter_jail_ns(struct user_jail_struct *info, const char *user, char *pid_fil
 
 	fd = open(pid_file, O_RDONLY);
 	if (fd < 0) {
+		if (errno == ENOENT) {
+			return 0;
+		}
 		return 1;
 	}
 
@@ -561,6 +685,25 @@ out:
 	return ret;
 }
 
+int wait_proc_mounted(const char *root_path) 
+{
+	char proc_uname_path[PATH_MAX];
+	int count;
+
+	snprintf(proc_uname_path, PATH_MAX, "%s/proc/uptime", root_path);
+
+	while (access(proc_uname_path, F_OK) < 0) {
+		usleep(100000);
+		count++;
+		/* wait for 5 seconds */
+		if (count > 10 * 5) {
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
 int unshare_pid(struct user_jail_struct *info, const char *user, const char *chroot_path) 
 {
 	char pid_file[MAX_LINE_LEN];
@@ -577,6 +720,11 @@ int unshare_pid(struct user_jail_struct *info, const char *user, const char *chr
 		if (enter_jail_ns(info, user, pid_file, chroot_path) != 0) {
 			return 1;
 		}
+	}
+
+	/*  from mount success */
+	if (wait_proc_mounted(chroot_path) != 0) {
+		return 1;
 	}
 
 	return 0;

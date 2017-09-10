@@ -1027,7 +1027,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (create_pid_file(PID_FILE_PATH) < 0) {
-		//return 1;	
+		return 1;	
 	}
 
 	atexit(onexit);

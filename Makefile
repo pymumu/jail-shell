@@ -35,10 +35,17 @@ install: all
 	@ln -v -f -s /usr/local/jailed-shell/bin/jailed-shell $(PREFIX)/usr/sbin/jailed-shell
 	@ln -v -f -s /etc/security/jailed-shell.conf $(JAILED_CONF_DIR)/jailed-shell.conf
 	@install -v -t $(JAILED_INIT_DIR) etc/init.d/jailed-shell -m 0755
+	@install -v -t /lib/systemd/system lib/systemd/system/jailed-shell.service -m 0644
+	@install -v -t /etc/default etc/default/jailed-shell -m 0644
 	@install -v -t $(JAILED_CONF_DIR) etc/jailed-shell/cmd_config etc/jailed-shell/cmdd_config -m 640
 	@install -v -t $(JAILED_CONF_DIR)/jail-config etc/jailed-shell/jail-config/default-jail.cfg -m 640
+	@systemctl daemon-reload
+	@systemctl enable jailed-shell
+	@systemctl start jailed-shell
 
 uninstall:
+	@systemctl stop jailed-shell
+	@systemctl disable jailed-shell
 	$(RM) -r $(JAILED_HOME_DIR)
 	$(RM) -r $(JAILED_CONF_DIR)
 	$(RM) $(JAILED_INIT_DIR)/jailed-shell
@@ -46,6 +53,9 @@ uninstall:
 	$(RM) $(PREFIX)/usr/sbin/jailed-shell
 	$(RM) $(SECURITY_DIR)/pam_jailed_shell.so
 	$(RM) /etc/security/jailed-shell.conf
+	$(RM) /lib/systemd/system/jailed-shell.service
+	$(RM) /etc/default/jailed-shell
+	@systemctl daemon-reload
 
 clean:
 	$(MAKE) -C $(JAILED_CMD_DIR) clean
