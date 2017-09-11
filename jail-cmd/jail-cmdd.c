@@ -2,13 +2,13 @@
  * Copyright (C) 2017 Ruilin Peng (Nick) <pymumu@gmail.com>
  */
 
-#include "jailed-cmd.h"
+#include "jail-cmd.h"
 #include <pty.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 
-#define PID_FILE_PATH "/var/run/jailed-cmdd.pid"
-#define DEFAULT_ROOT_DIR "/usr/local/jailed-shell/command"
+#define PID_FILE_PATH "/var/run/jail-cmdd.pid"
+#define DEFAULT_ROOT_DIR "/usr/local/jail-shell/command"
 
 struct cmdd_context {
 	int sock;
@@ -49,8 +49,8 @@ struct cmdd_config config = {
 void help(void)
 {
 	char *help = ""
-		"Usage: jailed-cmdd [OPTION]...\n"
-		"Start jailed cmd proxy server.\n"
+		"Usage: jail-cmdd [OPTION]...\n"
+		"Start jail cmd proxy server.\n"
 		"  -f            run forground.\n"
 		"  -h            show this help message.\n"
 		"\n"
@@ -151,7 +151,7 @@ int forksocket(int *mirror, int *mirror_err)
 	return pid;
 }
 
-int set_uid_gid(struct jailed_cmd_cmd *cmd_cmd)
+int set_uid_gid(struct jail_cmd_cmd *cmd_cmd)
 {
 	int uid = cmd_cmd->uid;
 	int gid = cmd_cmd->gid;
@@ -204,7 +204,7 @@ int injection_check(int argc, char *argv[])
 	return 0;
 }
 
-void run_process(struct jailed_cmd_cmd *cmd_cmd, char *jail_name) 
+void run_process(struct jail_cmd_cmd *cmd_cmd, char *jail_name) 
 {
 	char cmd_name[PATH_MAX];
 	char cmd_path[PATH_MAX];
@@ -255,7 +255,7 @@ errout:
 	fprintf(stderr, "-sh: %s: %s\n", argv[0], strerror(errno));
 }
 
-int get_jail_name(struct jailed_cmd_cmd *cmd_cmd, char *out, int out_max_len)
+int get_jail_name(struct jail_cmd_cmd *cmd_cmd, char *out, int out_max_len)
 {
 	struct passwd *pwd;
 	char jsid_file_path[PATH_MAX];
@@ -332,7 +332,7 @@ errout:
 	return -1;
 }
 
-int start_process(struct jailed_cmd_cmd *cmd_cmd, int *mirror, int *mirror_err)
+int start_process(struct jail_cmd_cmd *cmd_cmd, int *mirror, int *mirror_err)
 {
 	int pid = -1;
 	char jail_name[MAX_LINE_LEN]={0};
@@ -366,7 +366,7 @@ int start_process(struct jailed_cmd_cmd *cmd_cmd, int *mirror, int *mirror_err)
 	return pid;
 }
 
-int check_args(struct cmdd_context *context, struct jailed_cmd_head *cmd_head, struct jailed_cmd_cmd *cmd_cmd)
+int check_args(struct cmdd_context *context, struct jail_cmd_head *cmd_head, struct jail_cmd_cmd *cmd_cmd)
 {
 	int arg_len;
 	int argc = cmd_cmd->argc;
@@ -399,12 +399,12 @@ int check_args(struct cmdd_context *context, struct jailed_cmd_head *cmd_head, s
 	return 0;
 }
 
-CMD_RETURN process_cmd(struct cmdd_context *context, struct jailed_cmd_head *cmd_head) 
+CMD_RETURN process_cmd(struct cmdd_context *context, struct jail_cmd_head *cmd_head) 
 {
 	switch (cmd_head->type) {
 	case CMD_MSG_CMD: {
 		/*  init cmd message */
-		struct jailed_cmd_cmd *cmd_cmd = (struct jailed_cmd_cmd *)cmd_head->data;
+		struct jail_cmd_cmd *cmd_cmd = (struct jail_cmd_cmd *)cmd_head->data;
 
 		if (check_args(context, cmd_head, cmd_cmd)) {
 			FD_CLR(context->sock, &context->rfds);
@@ -429,7 +429,7 @@ CMD_RETURN process_cmd(struct cmdd_context *context, struct jailed_cmd_head *cmd
 		break; }
 	case CMD_MSG_DATA_IN: {
 		/*  input message  */
-		struct jailed_cmd_data *cmd_data = (struct jailed_cmd_data *)cmd_head->data;
+		struct jail_cmd_data *cmd_data = (struct jail_cmd_data *)cmd_head->data;
 		if (context->mirror < 0) {
 			break;
 		}
@@ -455,7 +455,7 @@ CMD_RETURN process_cmd(struct cmdd_context *context, struct jailed_cmd_head *cmd
 		break; }
 	case CMD_MSG_WINSIZE: {
 		/*  win size change message */
-		struct jailed_cmd_winsize *cmd_winsize = (struct jailed_cmd_winsize *)cmd_head->data;
+		struct jail_cmd_winsize *cmd_winsize = (struct jail_cmd_winsize *)cmd_head->data;
 		ioctl(context->mirror, TIOCSWINSZ, &cmd_winsize->ws);
 		break; }
 	default:
@@ -511,25 +511,25 @@ CMD_RETURN send_sock(struct cmdd_context *context)
 
 CMD_RETURN process_msg(struct cmdd_context *context) 
 {
-	struct jailed_cmd_head *cmd_head;
+	struct jail_cmd_head *cmd_head;
 	CMD_RETURN retval;
 
 	/*  process data which received from client. */
 	while (1) {
 		/*  if data is partial, continue recv */
-		if (context->recv_data.total_len - context->recv_data.curr_offset < sizeof(struct jailed_cmd_head)) {
+		if (context->recv_data.total_len - context->recv_data.curr_offset < sizeof(struct jail_cmd_head)) {
 			break;
 		}
 
-		cmd_head = (struct jailed_cmd_head *)(context->recv_data.data + context->recv_data.curr_offset);
-		if (cmd_head->magic != MSG_MAGIC || cmd_head->data_len > sizeof(context->recv_data.data) - sizeof(struct jailed_cmd_head)) {
+		cmd_head = (struct jail_cmd_head *)(context->recv_data.data + context->recv_data.curr_offset);
+		if (cmd_head->magic != MSG_MAGIC || cmd_head->data_len > sizeof(context->recv_data.data) - sizeof(struct jail_cmd_head)) {
 			/*  if recevied error data, exit. */
 			fprintf(stderr, "Data invalid\n");
 			return CMD_RETURN_ERR;
 		}
 
 		/*  if data is partial, continue recv */
-		if (context->recv_data.total_len - context->recv_data.curr_offset < sizeof(struct jailed_cmd_head) + cmd_head->data_len) {
+		if (context->recv_data.total_len - context->recv_data.curr_offset < sizeof(struct jail_cmd_head) + cmd_head->data_len) {
 			break;
 		}
 
@@ -538,7 +538,7 @@ CMD_RETURN process_msg(struct cmdd_context *context)
 			return retval;
 		}
 
-		context->recv_data.curr_offset += sizeof(struct jailed_cmd_head) + cmd_head->data_len;
+		context->recv_data.curr_offset += sizeof(struct jail_cmd_head) + cmd_head->data_len;
 	}
 
 	if (context->recv_data.total_len == context->recv_data.curr_offset) {
@@ -588,22 +588,22 @@ CMD_RETURN read_mirror_err(struct cmdd_context *context)
 	int need_size;
 	int free_buff_size;
 
-	struct jailed_cmd_head *cmd_head;
-	struct jailed_cmd_data *cmd_data;
+	struct jail_cmd_head *cmd_head;
+	struct jail_cmd_data *cmd_data;
 
 	free_buff_size = sizeof(context->send_data.data)  - context->send_data.total_len;
 	/*  if free space is not enougth, then block reading from stderr */
-	need_size = sizeof(struct jailed_cmd_head) + sizeof(struct jailed_cmd_data) + 16;
+	need_size = sizeof(struct jail_cmd_head) + sizeof(struct jail_cmd_data) + 16;
 	if ((free_buff_size - need_size) < 0) {
 		FD_CLR(context->mirror_err, &context->rfds);
 		return CMD_RETURN_OK;
 	}
 	
-	cmd_head = (struct jailed_cmd_head *)(context->send_data.data + context->send_data.total_len);
-	cmd_data = (struct jailed_cmd_data *)cmd_head->data;
+	cmd_head = (struct jail_cmd_head *)(context->send_data.data + context->send_data.total_len);
+	cmd_data = (struct jail_cmd_data *)cmd_head->data;
 	cmd_head->magic = MSG_MAGIC;
 	cmd_head->type = CMD_MSG_DATA_ERR;
-	len = read(context->mirror_err, cmd_data->data, free_buff_size - sizeof(struct jailed_cmd_head) - sizeof(struct jailed_cmd_data));
+	len = read(context->mirror_err, cmd_data->data, free_buff_size - sizeof(struct jail_cmd_head) - sizeof(struct jail_cmd_data));
 	if (len < 0) {
 		fprintf(stderr, "read mirror_err failed, %s\n", strerror(errno));
 		FD_CLR(context->mirror_err, &context->rfds);
@@ -697,8 +697,8 @@ CMD_RETURN write_mirror(struct cmdd_context *context)
 
 CMD_RETURN read_mirror(struct cmdd_context *context)
 {
-	struct jailed_cmd_head *cmd_head;
-	struct jailed_cmd_data *cmd_data;
+	struct jail_cmd_head *cmd_head;
+	struct jail_cmd_data *cmd_data;
 
 	int len;
 	int free_buff_size;
@@ -706,17 +706,17 @@ CMD_RETURN read_mirror(struct cmdd_context *context)
 
 	free_buff_size = sizeof(context->send_data.data)  - context->send_data.total_len;
 	/*  if free space is not enougth, then block reading from stdout */
-	need_size = sizeof(struct jailed_cmd_head) + sizeof(struct jailed_cmd_data) + 16;
+	need_size = sizeof(struct jail_cmd_head) + sizeof(struct jail_cmd_data) + 16;
 	if ((free_buff_size - need_size) < 0) {
 		FD_CLR(context->mirror, &context->rfds);
 		return CMD_RETURN_OK;
 	}
 	
-	cmd_head = (struct jailed_cmd_head *)(context->send_data.data + context->send_data.total_len);
-	cmd_data = (struct jailed_cmd_data *)cmd_head->data;
+	cmd_head = (struct jail_cmd_head *)(context->send_data.data + context->send_data.total_len);
+	cmd_data = (struct jail_cmd_data *)cmd_head->data;
 	cmd_head->magic = MSG_MAGIC;
 	cmd_head->type = CMD_MSG_DATA_OUT;
-	len = read(context->mirror, cmd_data->data, free_buff_size - sizeof(struct jailed_cmd_head) - sizeof(struct jailed_cmd_data));
+	len = read(context->mirror, cmd_data->data, free_buff_size - sizeof(struct jail_cmd_head) - sizeof(struct jail_cmd_data));
 	if (len < 0) {
 		CMD_RETURN retval;
 		/*  if child process exits normally, return exit coode to peer client. */
@@ -757,8 +757,8 @@ void send_exit_code(struct cmdd_context *context)
 	}
 
 	/* send child process exit code to client. */
-	struct jailed_cmd_head *cmd_head = (struct jailed_cmd_head *)(context->send_data.data + context->send_data.total_len);
-	struct jailed_cmd_exit *cmd_exit = (struct jailed_cmd_exit *)cmd_head->data;
+	struct jail_cmd_head *cmd_head = (struct jail_cmd_head *)(context->send_data.data + context->send_data.total_len);
+	struct jail_cmd_exit *cmd_exit = (struct jail_cmd_exit *)cmd_head->data;
 	cmd_head->magic = MSG_MAGIC;
 	cmd_head->type = CMD_MSG_EXIT_CODE;
 	cmd_head->data_len = sizeof(*cmd_exit);

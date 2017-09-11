@@ -1,0 +1,14 @@
+[Unit]
+Description=Jail Shell Server
+After=network.target 
+
+[Service]
+PIDFile=/var/run/jail-cmdd.pid
+EnvironmentFile=-/etc/default/jail-shell
+ExecStart=/usr/sbin/jail-cmdd $JAIL_CMDD_OPTS
+KillMode=process
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+Alias=jail-shell.service

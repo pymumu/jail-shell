@@ -1,36 +1,36 @@
 #!/bin/sh
 
 ### BEGIN INIT INFO
-# Provides:        jailed-shell
+# Provides:        jail-shell
 # Required-Start:  $network $remote_fs $syslog
 # Required-Stop:   $network $remote_fs $syslog
 # Default-Start:   2 3 4 5
 # Default-Stop:
-# Short-Description: Start jailed-shell daemon
+# Short-Description: Start jail-shell daemon
 ### END INIT INFO
 
 PATH=/sbin:/bin:/usr/sbin:/usr/bin
 
 . /lib/lsb/init-functions
 
-DAEMON=/usr/sbin/jailed-cmdd
-PIDFILE=/var/run/jailed-cmdd.pid
+DAEMON=/usr/sbin/jail-cmdd
+PIDFILE=/var/run/jail-cmdd.pid
 
 test -x $DAEMON || exit 5
 
 case $1 in
         start)
-                log_daemon_msg "Starting jailed-shell server" "jailed-cmdd"
+                log_daemon_msg "Starting jail-shell server" "jail-cmdd"
                 if [ -z "$UGID" ]; then
                         log_failure_msg "user \"$RUNASUSER\" does not exist"
                         exit 1
                 fi
-                start-stop-daemon --start --quiet --oknodo --pidfile $PIDFILE --startas $DAEMON -- -p $PIDFILE $JAILED_CMDDD_OPTS
+                start-stop-daemon --start --quiet --oknodo --pidfile $PIDFILE --startas $DAEMON -- -p $PIDFILE $JAIL_SHELL_OPTS
                 status=$?
                 log_end_msg $status
                 ;;
         stop)
-                log_daemon_msg "Stopping jailed-shell server" "jailed-cmdd"
+                log_daemon_msg "Stopping jail-shell server" "jail-cmdd"
                 start-stop-daemon --stop --quiet --oknodo --pidfile $PIDFILE
                 rm -f $PIDFILE
                 ;;
@@ -48,7 +48,7 @@ case $1 in
                 exit 3
                 ;;
         status)
-                status_of_proc $DAEMON "jailed-shell server"
+                status_of_proc $DAEMON "jail-shell server"
                 ;;
         *)
                 echo "Usage: $0 {start|stop|restart|try-restart|force-reload|status}"

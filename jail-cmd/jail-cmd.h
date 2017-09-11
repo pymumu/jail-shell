@@ -2,8 +2,8 @@
  * Copyright (C) 2017 Ruilin Peng (Nick) <pymumu@gmail.com>
  */
 
-#ifndef _JAILED_CMD_
-#define _JAILED_CMD_
+#ifndef _JAIL_CMD_
+#define _JAIL_CMD_
 
 #define _GNU_SOURCE
 #include <stdio.h>
@@ -45,7 +45,7 @@
 	_max1 > _max2 ? _max1 : _max2; })
 
 #define JAIL_KEY          "JSID"
-#define JAIL_JSID_FILE "/var/run/jailed-shell/jsid-%s"
+#define JAIL_JSID_FILE "/var/run/jail-shell/jsid-%s"
 #define MAX_LINE_LEN    1024
 
 typedef enum CMD_MSG_TYPE {
@@ -67,14 +67,14 @@ typedef enum CMD_RETURN {
 	CMD_RETURN_BUTT    =255
 }CMD_RETURN;
 
-struct jailed_cmd_head {
+struct jail_cmd_head {
 	unsigned long long magic;
 	unsigned int type;
 	unsigned int data_len;
 	unsigned char data[0];
 };
 
-struct jailed_cmd_cmd {
+struct jail_cmd_cmd {
 	uid_t uid;
 	uid_t gid;
 	int isatty;
@@ -85,15 +85,15 @@ struct jailed_cmd_cmd {
 	char argvs[0];
 };
 
-struct jailed_cmd_data {
+struct jail_cmd_data {
 	unsigned char data[0];
 };
 
-struct jailed_cmd_exit {
+struct jail_cmd_exit {
 	int exit_code;
 };
 
-struct jailed_cmd_winsize {
+struct jail_cmd_winsize {
 	struct winsize ws;
 };
 

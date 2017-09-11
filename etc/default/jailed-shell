@@ -1,5 +1,0 @@
-# Default settings for jailed shell server. This file is sourced by /bin/sh from
-# /etc/init.d/jailed-shell.
-
-# Options to pass to jailed-cmdd
-JAILED_SHLL_OPTS=

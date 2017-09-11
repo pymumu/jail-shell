@@ -4,17 +4,17 @@
 #
 
 JAIL_ROOT_DIR=
-CONF_PATH=/etc/jailed-shell/jail-config
-JAIL_SHELL_HOME=/usr/local/jailed-shell
+CONF_PATH=/etc/jail-shell/jail-config
+JAIL_SHELL_HOME=/usr/local/jail-shell
 COMMAND_PATH=$JAIL_SHELL_HOME/command
 JAIL_COMMAND_PATH=
-JAILED_CMD=/usr/bin/jailed-cmd
+JAIL_CMD=/usr/bin/jail-cmd
 ELF_FILE_LIST="`mktemp`"
-JAILED_SHELL_CONF=/etc/security/jailed-shell.conf
+JAIL_SHELL_CONF=/etc/jail-shell/jail-shell.conf
 
 get_root_dir()
 {
-	JAIL_ROOT_DIR="`grep "^ *JAIL_HOME" $JAILED_SHELL_CONF | awk '{print $2}'`"
+	JAIL_ROOT_DIR="`grep "^ *JAIL_HOME" $JAIL_SHELL_CONF | awk '{print $2}'`"
 	
 	if [ -z "$JAIL_ROOT_DIR" ]; then
 		return 1
@@ -25,10 +25,10 @@ get_root_dir()
 
 showhelp()
 {
-	echo "Usage: jailed-shell-setup [OPTION]"
+	echo "Usage: jail-shell-setup [OPTION]"
 	echo "Options:"
 	echo "  --list        list jail names."
-	echo "  --setup       setup jailed-shell."
+	echo "  --setup       setup jail-shell."
 	echo "-h, --help      show this help message."
 }
 
@@ -170,7 +170,7 @@ cmd()
 	user=${userinfo##*:}
 	group=${userinfo#*:}
 
-	ln -f -s $JAILED_CMD $1$2
+	ln -f -s $JAIL_CMD $1$2
 	if [ $? -ne 0 ]; then
 		return 1
 	fi
@@ -226,9 +226,9 @@ setup_jail()
 	done < $jail_cfg
 
 	if [ $cp_cmd -eq 1 ]; then
-		clink $JAIL_ROOT_DIR/$jail_name $JAIL_SHELL_HOME/jailed-cmd/jailed-cmd $JAILED_CMD 
+		clink $JAIL_ROOT_DIR/$jail_name $JAIL_SHELL_HOME/jail-cmd/jail-cmd $JAIL_CMD 
 		if [ $? -ne 0 ]; then
-			echo "copy jailed-cmd failed."
+			echo "copy jail-cmd failed."
 			return 1
 		fi
 	fi
@@ -270,7 +270,7 @@ main()
 
 	get_root_dir
 	if [ $? -ne 0 ]; then
-		echo "Please config JAIL_HOME path at file '/etc/security/jailed-shell.conf'"
+		echo "Please config JAIL_HOME path at file '/etc/security/jail-shell.conf'"
 		return 1
 	fi
 

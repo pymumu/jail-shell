@@ -4,17 +4,17 @@
 #
 showhelp()
 {
-	echo "Usage: jailed-shell [OPTION]"
+	echo "Usage: jail-shell [OPTION]"
 	echo "Options:"
 	echo "  -a | --add      add a user to jialed-shell."
-	echo "  -d | --del      del a user from jailed-shell."
-	echo "  -n | --name     jailed-shell name."
+	echo "  -d | --del      del a user from jail-shell."
+	echo "  -n | --name     jail-shell name."
 	echo "  -c | --config   config file."
-	echo "  --disable       disable jailed-shell feature."
-	echo "  --enable        enable jailed-shell feature."
+	echo "  --disable       disable jail-shell feature."
+	echo "  --enable        enable jail-shell feature."
 	echo "example:"
-	echo "  add user:  jailed-shell -a user -n \"default\" -c default.cfg"
-	echo "  del user:  jailed-shell -d user"
+	echo "  add user:  jail-shell -a user -n \"default\" -c default.cfg"
+	echo "  del user:  jail-shell -d user"
 }
 
 main()

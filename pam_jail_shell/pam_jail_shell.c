@@ -36,10 +36,10 @@
 #define PAM_EXTERN
 #endif
 
-#define JAIL_CONF_PATH "/etc/security/jailed-shell.conf"
-#define NS_PID_FILE_PATH "/var/run/jailed-shell-ns-%s.pid"
-#define JAIL_VAR_DIR "/var/run/jailed-shell"
-#define JAIL_JSID_FILE "/var/run/jailed-shell/jsid-%s"
+#define JAIL_CONF_PATH "/etc/security/jail-shell.conf"
+#define NS_PID_FILE_PATH "/var/run/jail-shell-ns-%s.pid"
+#define JAIL_VAR_DIR "/var/run/jail-shell"
+#define JAIL_JSID_FILE "/var/run/jail-shell/jsid-%s"
 
 #define TMP_BUFF_LEN_32   32
 #define MAX_LINE_LEN      4096
@@ -826,5 +826,5 @@ PAM_EXTERN int pam_sm_chauthtok(pam_handle_t *pamh, int flags, int argc, const c
 }
 
 #ifdef PAM_MODULE_ENTRY
-PAM_MODULE_ENTRY("pam_jailed_shell");
+PAM_MODULE_ENTRY("pam_jail_shell");
 #endif

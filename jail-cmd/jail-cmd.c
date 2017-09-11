@@ -2,8 +2,8 @@
  * Copyright (C) 2017 Ruilin Peng (Nick) <pymumu@gmail.com>
  */
 
-#include "jailed-cmd.h"
-#define JAILED_CMD "jailed-cmd"
+#include "jail-cmd.h"
+#define JAIL_CMD "jail-cmd"
 
 int window_size_changed = 0;
 int is_term_mode_change = 0;
@@ -37,8 +37,8 @@ struct cmd_config config = {
 void help(void)
 {
 	char *help = ""
-		"Usage: jailed-cmd [command] [args]\n"
-		"run jailed command.\n"
+		"Usage: jail-cmd [command] [args]\n"
+		"run jail command.\n"
 	   	"press CTRL+] to exit.\n"
 		;
 	printf(help);
@@ -70,15 +70,15 @@ void reset_term(void)
 /*  send user information, term information, args to peer server. */
 int cmd_init(struct cmd_context *context, int argc, char *argv[])
 {
-	struct jailed_cmd_head *cmd_head = (struct jailed_cmd_head *)context->send_data.data;
-	struct jailed_cmd_cmd *cmd = NULL;
+	struct jail_cmd_head *cmd_head = (struct jail_cmd_head *)context->send_data.data;
+	struct jail_cmd_cmd *cmd = NULL;
 	int arg_len = 0;
 	int i = 0;
 
 	cmd_head->magic = MSG_MAGIC;
 	cmd_head->type = CMD_MSG_CMD;
 	cmd_head->data_len = sizeof(*cmd);
-	cmd = (struct jailed_cmd_cmd *)(cmd_head->data);
+	cmd = (struct jail_cmd_cmd *)(cmd_head->data);
 
 	cmd->uid = geteuid();
 	cmd->gid = getegid();
@@ -127,22 +127,22 @@ CMD_RETURN read_stdin(struct cmd_context *context)
 	int need_size;
 	int free_buff_size;
 
-	struct jailed_cmd_head *cmd_head;
-	struct jailed_cmd_data *cmd_data;
+	struct jail_cmd_head *cmd_head;
+	struct jail_cmd_data *cmd_data;
 
 	free_buff_size = sizeof(context->send_data.data)  - context->send_data.total_len;
 	/*  if free space is not enougth, then block reading from stdin */
-	need_size = sizeof(struct jailed_cmd_head) + sizeof(struct jailed_cmd_data) + 16;
+	need_size = sizeof(struct jail_cmd_head) + sizeof(struct jail_cmd_data) + 16;
 	if ((free_buff_size - need_size) < 0) {
 		FD_CLR(STDIN_FILENO, &context->rfds);
 		return CMD_RETURN_OK;
 	}
 	
-	cmd_head = (struct jailed_cmd_head *)(context->send_data.data + context->send_data.total_len);
-	cmd_data = (struct jailed_cmd_data *)cmd_head->data;
+	cmd_head = (struct jail_cmd_head *)(context->send_data.data + context->send_data.total_len);
+	cmd_data = (struct jail_cmd_data *)cmd_head->data;
 	cmd_head->magic = MSG_MAGIC;
 	cmd_head->type = CMD_MSG_DATA_IN;
-	len = read(STDIN_FILENO, cmd_data->data, free_buff_size - sizeof(struct jailed_cmd_head) - sizeof(struct jailed_cmd_data));
+	len = read(STDIN_FILENO, cmd_data->data, free_buff_size - sizeof(struct jail_cmd_head) - sizeof(struct jail_cmd_data));
 	if (len < 0) {
 		FD_CLR(STDIN_FILENO, &context->rfds);
 		fprintf(stderr, "read mirror failed, %s\r\n", strerror(errno));
@@ -172,22 +172,22 @@ CMD_RETURN read_stdin(struct cmd_context *context)
 	return CMD_RETURN_OK;
 }
 
-CMD_RETURN process_cmd(struct cmd_context *context, struct jailed_cmd_head *cmd_head) 
+CMD_RETURN process_cmd(struct cmd_context *context, struct jail_cmd_head *cmd_head) 
 {	
 	switch (cmd_head->type) {
 	case CMD_MSG_DATA_OUT: {
 		 /*  Write out data to stdout */
-		struct jailed_cmd_data *cmd_data = (struct jailed_cmd_data *)cmd_head->data;
+		struct jail_cmd_data *cmd_data = (struct jail_cmd_data *)cmd_head->data;
 		write(STDOUT_FILENO, cmd_data->data, cmd_head->data_len);
 		break; }
 	case CMD_MSG_DATA_ERR: {
 		 /*  Write err data to stderr */
-		struct jailed_cmd_data *cmd_data = (struct jailed_cmd_data *)cmd_head->data;
+		struct jail_cmd_data *cmd_data = (struct jail_cmd_data *)cmd_head->data;
 		write(STDERR_FILENO, cmd_data->data, cmd_head->data_len);
 		break; }
 	case CMD_MSG_EXIT_CODE: {
 		/*  get exit code from peer child process */
-		struct jailed_cmd_exit *cmd_exit = (struct jailed_cmd_exit *)cmd_head->data;
+		struct jail_cmd_exit *cmd_exit = (struct jail_cmd_exit *)cmd_head->data;
 		context->prog_exit = cmd_exit->exit_code;
 		return CMD_RETURN_EXIT;
 		break; }
@@ -240,7 +240,7 @@ CMD_RETURN send_sock(struct cmd_context *context)
 CMD_RETURN recv_sock(struct cmd_context *context) 
 {
 	int len;
-	struct jailed_cmd_head *cmd_head;
+	struct jail_cmd_head *cmd_head;
 	CMD_RETURN retval;
 
 	/*  recv data from peer server */
@@ -259,19 +259,19 @@ CMD_RETURN recv_sock(struct cmd_context *context)
 	/*  process data which received from server. */
 	while (1) {
 		/*  if data is partial, continue recv */
-		if (context->recv_data.total_len - context->recv_data.curr_offset < sizeof(struct jailed_cmd_head)) {
+		if (context->recv_data.total_len - context->recv_data.curr_offset < sizeof(struct jail_cmd_head)) {
 			break;
 		}
 
-		cmd_head = (struct jailed_cmd_head *)(context->recv_data.data + context->recv_data.curr_offset);
-		if (cmd_head->magic != MSG_MAGIC || cmd_head->data_len > sizeof(context->recv_data.data) - sizeof(struct jailed_cmd_head)) {
+		cmd_head = (struct jail_cmd_head *)(context->recv_data.data + context->recv_data.curr_offset);
+		if (cmd_head->magic != MSG_MAGIC || cmd_head->data_len > sizeof(context->recv_data.data) - sizeof(struct jail_cmd_head)) {
 			/*  if recevied error data, exit. */
 			fprintf(stderr, "Data invalid\r\n"); 
 			return CMD_RETURN_ERR;
 		}
 
 		/*  if data is partial, continue recv */
-		if (context->recv_data.total_len - context->recv_data.curr_offset < sizeof(struct jailed_cmd_head) + cmd_head->data_len) {
+		if (context->recv_data.total_len - context->recv_data.curr_offset < sizeof(struct jail_cmd_head) + cmd_head->data_len) {
 			break;
 		}
 
@@ -280,7 +280,7 @@ CMD_RETURN recv_sock(struct cmd_context *context)
 			return retval;
 		}
 
-		context->recv_data.curr_offset += sizeof(struct jailed_cmd_head) + cmd_head->data_len;
+		context->recv_data.curr_offset += sizeof(struct jail_cmd_head) + cmd_head->data_len;
 	}
 
 	if (context->recv_data.total_len == context->recv_data.curr_offset) {
@@ -302,20 +302,20 @@ CMD_RETURN recv_sock(struct cmd_context *context)
 
 int set_win_size(struct cmd_context *context) 
 {
-	struct jailed_cmd_head *cmd_head;
-	struct jailed_cmd_winsize *cmd_winsize;
+	struct jail_cmd_head *cmd_head;
+	struct jail_cmd_winsize *cmd_winsize;
 
 	if (window_size_changed == 0) {
 		return 0;
 	}	
 
-	if (sizeof(context->send_data.data) - context->send_data.total_len < sizeof(struct jailed_cmd_head)) {
+	if (sizeof(context->send_data.data) - context->send_data.total_len < sizeof(struct jail_cmd_head)) {
 		return 0;
 	}
 
 	/*  if terminal win size changed, read winsize and send to peer server */
-	cmd_head = (struct jailed_cmd_head *)(context->send_data.data + context->send_data.total_len);
-	cmd_winsize = (struct jailed_cmd_winsize *)cmd_head->data;
+	cmd_head = (struct jail_cmd_head *)(context->send_data.data + context->send_data.total_len);
+	cmd_winsize = (struct jail_cmd_winsize *)cmd_head->data;
 	cmd_head->magic = MSG_MAGIC;
 	cmd_head->type = CMD_MSG_WINSIZE;
 	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &cmd_winsize->ws) != 0) {
@@ -492,7 +492,7 @@ void signal_handler(int sig)
 int main(int argc, char *argv[])
 {
 	/*  if command is not executed from symbol link, the arg[1] is the command will being executed */
-	if (strncmp(basename(argv[0]), JAILED_CMD, PATH_MAX) == 0) {
+	if (strncmp(basename(argv[0]), JAIL_CMD, PATH_MAX) == 0) {
 		argc -= 1;
 		argv++;
 		

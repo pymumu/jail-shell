@@ -1,19 +1,19 @@
 
-PAM_JAILED_SHELL_OBJS=pam_jailed_shell.o
-PAM_JAILED_SHELL=pam_jailed_shell.so
+PAM_JAIL_SHELL_OBJS=pam_jail_shell.o
+PAM_JAIL_SHELL=pam_jail_shell.so
 
 CFLAGS +=-g -fPIC -Wall -Wall -Wstrict-prototypes -fno-omit-frame-pointer -Wstrict-aliasing 
 CXXFLAGS +=-Wall -fno-omit-frame-pointer -Wstrict-aliasing
 
 .PHONY: all 
 
-all: $(PAM_JAILED_SHELL) 
+all: $(PAM_JAIL_SHELL) 
 
-$(PAM_JAILED_SHELL) : $(PAM_JAILED_SHELL_OBJS)
+$(PAM_JAIL_SHELL) : $(PAM_JAIL_SHELL_OBJS)
 	$(CC) $(CFLAGS) $^ -shared -o $@
 
 
 clean:
-	$(RM) $(PAM_JAILED_SHELL) $(PAM_JAILED_SHELL_OBJS) 
+	$(RM) $(PAM_JAIL_SHELL) $(PAM_JAIL_SHELL_OBJS) 
 
 
