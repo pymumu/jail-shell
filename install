@@ -1,0 +1,243 @@
+#!/bin/sh
+#
+# Copyright (C) 2017 Ruilin Peng (Nick) <pymumu@gmail.com>
+#
+
+INST_DIR=$(cd $(dirname $0);pwd)
+
+showhelp()
+{
+	echo "Usage: install [OPTION]"
+	echo "Options:"
+	echo " -i				install jail-shell."
+	echo " -u 				uninstall jail-shell."
+	echo " --prefix [dir]	prefix directory."
+	echo " -h				show this message."
+}
+
+start_service()
+{
+	if [ -z "`which systemctl`" ]; then
+		chkconfig jail-shell on
+		service jail-shell start
+		return $?
+	fi
+
+	systemctl daemon-reload
+	systemctl enable jail-shell
+	systemctl start jail-shell
+}
+
+stop_service()
+{
+	if [ -z "`which systemctl`" ]; then
+		service jail-shell stop
+		chkconfig jail-shell off
+		return 0
+	fi
+
+	systemctl stop jail-shell
+	systemctl disable jail-shell
+
+	return 0
+}
+
+clean_service()
+{
+	systemctl daemon-reload
+}
+
+install_files()
+{
+	install -v -d $JAIL_SHELL_HOME_DIR/command \
+		$JAIL_SHELL_HOME_DIR/jail-cmd/ $JAIL_SHELL_CONF_DIR/jail-config \
+		$JAIL_SHELL_CONF_DIR $JAIL_SHELL_HOME_DIR/rootfs $JAIL_SHELL_HOME_DIR/bin
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+	
+	install -v -m 0755  -t $JAIL_SHELL_HOME_DIR/jail-cmd/ jail-cmd/jail-cmd jail-cmd/jail-cmdd 
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+
+	ln -v -f -s /usr/local/jail-shell/jail-cmd/jail-cmdd $PREFIX/usr/sbin/jail-cmdd 
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+
+	install -v -m 0755 -t $JAIL_SHELL_HOME_DIR/bin bin/jail-shell bin/jail-shell-setup 
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+
+	ln -v -f -s /usr/local/jail-shell/bin/jail-shell $PREFIX/usr/sbin/jail-shell
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+
+	install -v -m 0755  -t  $SECURITY_DIR pam_jail_shell/pam_jail_shell.so 
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+
+	install -v -m 0600 -t  $PREFIX/etc/security pam_jail_shell/jail-shell.conf 
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+
+	ln -v -f -s /etc/security/jail-shell.conf $JAIL_SHELL_CONF_DIR/jail-shell.conf
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+	
+	install -v -m 0755 -t $JAIL_SHELL_INIT_DIR etc/init.d/jail-shell 
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+
+	install -v -m 0644 -t $PREFIX/lib/systemd/system lib/systemd/system/jail-shell.service 
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+
+	install -v -m 0644 -t $PREFIX/etc/default etc/default/jail-shell 
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+
+	install -v -t $JAIL_SHELL_CONF_DIR etc/jail-shell/cmd_config etc/jail-shell/cmdd_config -m 640
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+
+	install -v -t $JAIL_SHELL_CONF_DIR/jail-config etc/jail-shell/jail-config/default-jail.cfg -m 640
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+
+	add_pam_config
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+
+	return 0
+}
+
+remove_pam_config()
+{
+	sed -i '/pam_jail_shell.so/d' $PREFIX/etc/pam.d/common-session
+}
+
+add_pam_config() 
+{
+	remove_pam_config
+	echo "session required		pam_jail_shell.so" >> $PREFIX/etc/pam.d/common-session
+	return $?
+}
+
+
+uninstall_jail_shell()
+{
+	if [ -z "$PREFIX" ]; then
+		remove_pam_config
+		stop_service
+	fi	
+	rm -fr $JAIL_SHELL_HOME_DIR
+	rm -fr $JAIL_SHELL_CONF_DIR
+	rm -fr $JAIL_SHELL_INIT_DIR/jail-shell
+	rm -fr $PREFIX/usr/sbin/jail-cmdd
+	rm -fr $PREFIX/usr/sbin/jail-shell
+	rm -fr $SECURITY_DIR/pam_jail_shell.so
+	rm -fr $PREFIX/etc/security/jail-shell.conf
+	rm -fr $PREFIX/lib/systemd/system/jail-shell.service
+	rm -fr $PREFIX/etc/default/jail-shell
+
+	if [ -z "$PREFIX" ]; then
+		clean_service
+	fi	
+}
+
+
+install_jail_shell()
+{
+	local ret
+
+	install_files
+	ret=$?
+	if [ $ret -ne 0 ]; then
+		uninstall_jail_shell
+		return $ret
+	fi
+
+	if [ -z "$PREFIX" ]; then
+		start_service
+	fi
+
+	return 0
+}
+
+
+
+init_dir()
+{
+	JAIL_SHELL_HOME_DIR=$PREFIX/usr/local/jail-shell
+	JAIL_SHELL_CONF_DIR=$PREFIX/etc/jail-shell
+	JAIL_SHELL_INIT_DIR=$PREFIX/etc/init.d
+	LIB_DIR=$PREFIX"`ldd /bin/sh | grep libc | awk '{print $3}' | xargs dirname`"
+	SECURITY_DIR=$LIB_DIR/security
+
+	cd $INST_DIR
+}
+
+main()
+{
+	ACTION=""
+
+	OPTS=`getopt -o iuh --long help,prefix: \
+		-n  "" -- "$@"`
+
+	if [ $? != 0 ] ; then echo "Terminating..." >&2 ; exit 1 ; fi
+
+	# Note the quotes around `$TEMP': they are essential!
+	eval set -- "$OPTS"
+
+	while true; do
+		case "$1" in
+		--prefix)
+			PREFIX="$2"
+			shift 2;;
+		-h | --help )
+			showhelp
+			return 0
+			shift ;;
+		-i )
+			ACTION="INSTALL"
+			shift ;;
+		-u )
+			ACTION="UNINSTALL"
+			shift ;;
+		-- ) shift; break ;;
+		* ) break ;;
+  		esac
+	done
+
+	init_dir
+
+	if [ -z "$ACTION" ]; then
+		showhelp
+		return 0
+	elif [ "$ACTION" = "INSTALL" ]; then
+		install_jail_shell
+		return $?
+	elif [ "$ACTION" = "UNINSTALL" ]; then
+		uninstall_jail_shell
+		return 0
+	fi	
+
+}
+
+main $@
+exit $?
+
+

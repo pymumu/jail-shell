@@ -2,57 +2,76 @@
 
 ### BEGIN INIT INFO
 # Provides:        jail-shell
-# Required-Start:  $network $remote_fs $syslog
-# Required-Stop:   $network $remote_fs $syslog
+# Required-Start:  $network 
+# Required-Stop:   $network 
 # Default-Start:   2 3 4 5
 # Default-Stop:
-# Short-Description: Start jail-shell daemon
+# Short-Description: Start jail-shell server
 ### END INIT INFO
 
 PATH=/sbin:/bin:/usr/sbin:/usr/bin
 
-. /lib/lsb/init-functions
-
-DAEMON=/usr/sbin/jail-cmdd
+JAIL_CMDD=/usr/sbin/jail-cmdd
 PIDFILE=/var/run/jail-cmdd.pid
 
-test -x $DAEMON || exit 5
+test -x $JAIL_CMDD || exit 5
 
 case $1 in
-        start)
-                log_daemon_msg "Starting jail-shell server" "jail-cmdd"
-                if [ -z "$UGID" ]; then
-                        log_failure_msg "user \"$RUNASUSER\" does not exist"
-                        exit 1
-                fi
-                start-stop-daemon --start --quiet --oknodo --pidfile $PIDFILE --startas $DAEMON -- -p $PIDFILE $JAIL_SHELL_OPTS
-                status=$?
-                log_end_msg $status
-                ;;
-        stop)
-                log_daemon_msg "Stopping jail-shell server" "jail-cmdd"
-                start-stop-daemon --stop --quiet --oknodo --pidfile $PIDFILE
-                rm -f $PIDFILE
-                ;;
-        restart|force-reload)
-                $0 stop && sleep 2 && $0 start
-                ;;
-        try-restart)
-                if $0 status >/dev/null; then
-                        $0 restart
-                else
-                        exit 0
-                fi
-                ;;
-        reload)
-                exit 3
-                ;;
-        status)
-                status_of_proc $DAEMON "jail-shell server"
-                ;;
-        *)
-                echo "Usage: $0 {start|stop|restart|try-restart|force-reload|status}"
-                exit 2
-                ;;
+	start)
+		$JAIL_CMDD $JAIL_SHELL_OPTS
+		while true; do
+			if [ -e "$PIDFILE" ]; then
+				break;
+			fi
+			sleep .5
+		done
+		PID="`cat $PIDFILE 2>/dev/null`"
+		if [ -z "$PID" ]; then
+			echo "start jail-shell server failed."
+			exit 1
+		fi
+		if [ ! -e "/proc/$PID" ]; then
+			echo "start jail-shell server failed."
+			exit 1
+		fi
+		echo "start jail-shell server success."
+		;;
+	stop)
+		if [ ! -f "$PIDFILE" ]; then
+			echo "jail-shell server is stopped."
+			exit 0
+		fi
+		PID="`cat $PIDFILE 2>/dev/null`"
+		if [ ! -e "/proc/$PID" ] || [ -z "$PID" ]; then
+			echo "jail-shell server is stopped"
+			exit 0
+		fi
+
+		kill -TERM $PID
+		if [ $? -ne 0 ]; then
+			echo "Stop jail-shell server failed."
+			exit 1;
+		fi
+		rm -f $PIDFILE
+		echo "Stop jail-shell server success."
+		;;
+	restart)
+		$0 stop && sleep 1 && $0 start
+		;;
+	status)
+		PID="`cat $PIDFILE 2>/dev/null`"
+		if [ ! -e "/proc/$PID" ] || [ -z "$PID" ]; then
+			echo "jail-shell server is not running."
+			exit 1
+		fi
+		echo "jail-shell server is running."
+		status=$?
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart|status}"
+		exit 2
+		;;
 esac
+
+exit $status
 
