@@ -24,7 +24,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <dirent.h> 
-
+#include <sys/syscall.h>
 
 #define  PAM_SM_SESSION
 #include <security/pam_modules.h>
@@ -329,7 +329,6 @@ int try_lock_pid(const char *pid_file)
 	}
 
 	if (lockf(fd, F_TLOCK, 0) < 0) {
-		fprintf(stderr, "Server is already running.\n");
 		goto errout;
 	}
 
@@ -351,18 +350,16 @@ int mount_proc(const char *root_path)
 	snprintf(proc_path, PATH_MAX, "%s/proc", root_path);
 	snprintf(pts_path, PATH_MAX, "%s/dev/pts", root_path);
 
+	snprintf(check_file, PATH_MAX, "%s/ptmx", pts_path);
+	if (lstat(check_file, &buf) == 0) {
+		return 0;
+	}
+
 	mkdir(proc_path, 0555);
 	mkdir(pts_path, 0755);
 
 	mount("none", "/", NULL, MS_REC|MS_PRIVATE, NULL);
 	mount("none", "/proc", NULL, MS_REC|MS_PRIVATE, NULL);
-
-	snprintf(check_file, PATH_MAX, "%s/ptmx", pts_path);
-	if (lstat(check_file, &buf) != 0) {
-		if (mount("devpts", pts_path, "devpts",  MS_NOSUID|MS_NOEXEC, NULL) < 0) {
-			return 1;
-		}
-	}
 
 	/*
 	if (do_chroot(chroot_path) < 0) {
@@ -370,11 +367,12 @@ int mount_proc(const char *root_path)
 		exit(0);
 	}
 	*/
-	snprintf(check_file, PATH_MAX, "%s/uptime", proc_path);
-	if (lstat(check_file, &buf) != 0) {
-		if (mount("proc", proc_path, "proc", MS_NOSUID|MS_NOEXEC|MS_NODEV, NULL) < 0) {
-			return 1;
-		}
+	if (mount("proc", proc_path, "proc", MS_RDONLY | MS_NOSUID|MS_NOEXEC|MS_NODEV, NULL) < 0) {
+		return 1;
+	}
+
+	if (mount("devpts", pts_path, "devpts",  MS_NOSUID|MS_NOEXEC, NULL) < 0) {
+		return 1;
 	}
 
 	return 0;
@@ -516,6 +514,7 @@ errout:
 
 int enter_ns(int pid, char *ns_name, int flag) 
 {
+#ifdef __NR_setns
 	char ns_file[MAX_LINE_LEN];
 	int fd = 0;
 	snprintf(ns_file, MAX_LINE_LEN, "/proc/%d/ns/%s", pid, ns_name);
@@ -533,6 +532,9 @@ int enter_ns(int pid, char *ns_name, int flag)
 	close(fd);
 
 	return 0;
+#else
+	return 1;
+#endif
 }
 
 int enter_jail_ns(struct user_jail_struct *info, const char *user, char *pid_file, const char *chroot_path)
@@ -608,7 +610,7 @@ int set_jsid_env(pam_handle_t *pamh, struct user_jail_struct *info, const char *
 	if (jsid_fd < 0) {
 		create_gid = 1;
 	} else {
-		if (fd > 0) {
+		if (fd > 0 && lseek(fd, 0, SEEK_END) > 0) {
 			create_gid = 1;
 			close(jsid_fd);
 			jsid_fd = -1;
@@ -661,7 +663,7 @@ int set_jsid_env(pam_handle_t *pamh, struct user_jail_struct *info, const char *
 		buff[len] = 0;
 
 		line_end = index(buff, '\n');
-		if (line_end == NULL) {
+		if (line_end) {
 			buff[line_end - buff] = 0;
 		}
 
