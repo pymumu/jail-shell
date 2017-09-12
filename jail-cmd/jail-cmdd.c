@@ -573,6 +573,9 @@ CMD_RETURN recv_sock(struct cmdd_context *context)
 		shutdown(context->sock, SHUT_RD);
 		context->is_sock_eof = 1;
 		/*  wake up mirror write event, write remain data to stdin */
+		if (context->mirror <= 0 || context->is_mirror_eof == 1) {
+			return CMD_RETURN_EXIT;
+		}
 		FD_SET(context->mirror, &context->wfds);
 		return CMD_RETURN_OK;
 	}

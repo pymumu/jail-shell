@@ -17,7 +17,7 @@ showhelp()
 
 start_service()
 {
-	if [ -z "`which systemctl`" ]; then
+	if [ $ISSYSTEMD -ne 0 ]; then
 		chkconfig jail-shell on
 		service jail-shell start
 		return $?
@@ -30,7 +30,7 @@ start_service()
 
 stop_service()
 {
-	if [ -z "`which systemctl`" ]; then
+	if [ $ISSYSTEMD -ne 0 ]; then
 		service jail-shell stop
 		chkconfig jail-shell off
 		return 0
@@ -44,6 +44,9 @@ stop_service()
 
 clean_service()
 {
+	if [ $ISSYSTEMD -ne 0 ]; then
+		return 0
+	fi
 	systemctl daemon-reload
 }
 
@@ -96,9 +99,11 @@ install_files()
 		return 1
 	fi
 
-	install -v -m 0644 -t $PREFIX/lib/systemd/system lib/systemd/system/jail-shell.service 
-	if [ $? -ne 0 ]; then
-		return 1
+	if [ $ISSYSTEMD -eq 0 ]; then
+		install -v -m 0644 -t $PREFIX/lib/systemd/system lib/systemd/system/jail-shell.service 
+		if [ $? -ne 0 ]; then
+			return 1
+		fi
 	fi
 
 	install -v -m 0644 -t $PREFIX/etc/default etc/default/jail-shell 
@@ -126,13 +131,29 @@ install_files()
 
 remove_pam_config()
 {
-	sed -i '/pam_jail_shell.so/d' $PREFIX/etc/pam.d/common-session
+	sed -i '/pam_jail_shell.so/d' $PREFIX/etc/pam.d/common-session 2>/dev/null 
+	sed -i '/pam_jail_shell.so/d' $PREFIX/etc/pam.d/login 2>/dev/null
+	sed -i '/pam_jail_shell.so/d' $PREFIX/etc/pam.d/sshd 2>/dev/null
 }
 
 add_pam_config() 
 {
 	remove_pam_config
-	echo "session required		pam_jail_shell.so" >> $PREFIX/etc/pam.d/common-session
+	echo "session required		pam_jail_shell.so" >> $PREFIX/etc/pam.d/common-session 2>/dev/null
+	if [ $? -eq 0 ]; then
+		return 0
+	fi
+
+	echo "session required		pam_jail_shell.so" >> $PREFIX/etc/pam.d/login 2>/dev/null
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+
+	echo "session required		pam_jail_shell.so" >> $PREFIX/etc/pam.d/sshd 2>/dev/null
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+
 	return $?
 }
 
@@ -186,6 +207,8 @@ init_dir()
 	JAIL_SHELL_INIT_DIR=$PREFIX/etc/init.d
 	LIB_DIR=$PREFIX"`ldd /bin/sh | grep libc | awk '{print $3}' | xargs dirname`"
 	SECURITY_DIR=$LIB_DIR/security
+	which systemctl 2>/dev/null
+	ISSYSTEMD="$?"
 
 	cd $INST_DIR
 }
