@@ -378,7 +378,7 @@ int do_mount(struct user_jail_struct *info, const char *root_path)
 	mount("none", "/proc", NULL, MS_REC|MS_PRIVATE, NULL);
 
 	if (mount_from_cfg(info) != 0) {
-		return 0;
+		return 1;
 	}
 
 	/*
