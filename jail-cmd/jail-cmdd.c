@@ -39,6 +39,7 @@ struct cmdd_config {
 	int enable_log;
 };
 
+int pid_file_fd;
 
 struct cmdd_config config = {
 	.port = DEFAULT_PORT,
@@ -961,6 +962,7 @@ int run_server(int port)
 		pid = fork();
 		if (pid == 0) {
 			close(server);
+			close(pid_file_fd);
 			serve(sock);
 
 			/* wait peer recv all data */
@@ -1028,8 +1030,8 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 	}
-
-	if (create_pid_file(PID_FILE_PATH) < 0) {
+	pid_file_fd = create_pid_file(PID_FILE_PATH); 
+	if (pid_file_fd < 0) {
 		return 1;	
 	}
 

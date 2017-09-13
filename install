@@ -9,10 +9,10 @@ showhelp()
 {
 	echo "Usage: install [OPTION]"
 	echo "Options:"
-	echo " -i				install jail-shell."
-	echo " -u 				uninstall jail-shell."
-	echo " --prefix [dir]	prefix directory."
-	echo " -h				show this message."
+	echo " -i               install jail-shell."
+	echo " -u               uninstall jail-shell."
+	echo " --prefix [dir]   prefix directory."
+	echo " -h               show this message."
 }
 
 start_service()
@@ -139,9 +139,12 @@ remove_pam_config()
 add_pam_config() 
 {
 	remove_pam_config
-	echo "session required		pam_jail_shell.so" >> $PREFIX/etc/pam.d/common-session 2>/dev/null
-	if [ $? -eq 0 ]; then
-		return 0
+	if [ -e "$PREFIX/etc/pam.d/common-session" ]; then
+		echo "session required		pam_jail_shell.so" >> $PREFIX/etc/pam.d/common-session 2>/dev/null
+		if [ $? -eq 0 ]; then
+			return 0
+		fi
+		return 1
 	fi
 
 	echo "session required		pam_jail_shell.so" >> $PREFIX/etc/pam.d/login 2>/dev/null

@@ -39,8 +39,8 @@ showhelp()
 	echo "Options:"
 	echo "  --list                    list jail names."
 	echo "  --install [name | all]    install jail-shell from config file."
-	echo "  --remove [name]           remove a jial-shell."
-	echo "  --clean [name]            cleanup a jial-shell."
+	echo "  --remove [name]           remove a jail-shell."
+	echo "  --clean [name]            cleanup a jail-shell."
 	echo "  -h, --help                show this help message."
 }
 
@@ -100,6 +100,11 @@ cp_lib()
 				mkdir -m 0755 -p $JAIL_ROOT_DIR/$DIR
 			fi
 			link_cp $FILE $JAIL_ROOT_DIR/$DIR
+			if [ $? -ne 0 ]; then
+				rm -f $LIBS_ALL_FILE
+				rm -f $LIBS_FILE
+				return 1
+			fi
 			LIB_FILE="`readlink -e $FILE`"
 		fi
 		DIR="`dirname $LIB_FILE`"
@@ -107,6 +112,11 @@ cp_lib()
 			mkdir -m 0755 -p $JAIL_ROOT_DIR/$DIR
 		fi
 		link_cp $LIB_FILE $JAIL_ROOT_DIR/$DIR
+		if [ $? -ne 0 ]; then
+			rm -f $LIBS_ALL_FILE
+			rm -f $LIBS_FILE
+			return 1
+		fi
 	done < $LIBS_ALL_FILE
 
 	rm -f $LIBS_ALL_FILE
@@ -319,13 +329,14 @@ clean_jail()
 		return 1
 	fi
 
+	fuser -k $JAIL_PATH >/dev/null
+
 	cat /proc/mounts | grep "/$JAIL_NAME/" | tac | awk '{print $2}' | xargs -i umount {} 
 	if [ $? -ne 0 ]; then
 		echo "umount directories failed."
 		return 1
 	fi
 
-	fuser -k $JAIL_PATH
 	return 0
 }
 
@@ -359,7 +370,7 @@ clean_jails()
 	
 	clean_jail "$JAIL_NAME" "$JAIL_CFG"
 	if [ $? -ne 0 ]; then
-		echo "setup jail $JAIL_NAME failed."
+		echo "clean jail $JAIL_NAME failed."
 		ret=1
 	fi
 
@@ -430,9 +441,9 @@ list_jail()
 		JAIL_NAME="`basename $JAIL_CFG .cfg`"
 		echo -n "$JAIL_NAME"
 		if [ -d "$JAIL_DIR/$JAIL_NAME" ]; then
-			echo  "\t\t Installed"
+			echo -e "\t\t Installed"
 		else
-			echo  "\t\t Not Install"
+			echo -e "\t\t Not Install"
 		fi
 	done	
 }
