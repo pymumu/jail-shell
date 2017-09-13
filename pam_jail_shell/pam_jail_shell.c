@@ -40,6 +40,7 @@
 #define NS_PID_FILE_PATH "/var/run/jail-shell-ns-%s.pid"
 #define JAIL_VAR_DIR "/var/run/jail-shell"
 #define JAIL_JSID_FILE "/var/run/jail-shell/jsid-%s"
+#define MOUNT_SCRIPT_PATH "/usr/local/jail-shell/bin/jail-shell-setup"
 
 #define TMP_BUFF_LEN_32   32
 #define MAX_LINE_LEN      4096
@@ -340,7 +341,22 @@ errout:
 	return -1;
 }
 
-int mount_proc(const char *root_path)
+int mount_from_cfg(struct user_jail_struct *info)
+{
+	char mount_cmd[PATH_MAX];
+	int ret;
+
+	snprintf(mount_cmd, PATH_MAX, "%s --mount %s", MOUNT_SCRIPT_PATH, info->jail);
+
+	ret = system(mount_cmd);
+	if (ret != 0) {
+		return 1;
+	}
+
+	return 0;
+}
+
+int do_mount(struct user_jail_struct *info, const char *root_path)
 {
 	char proc_path[PATH_MAX];
 	char pts_path[PATH_MAX];
@@ -360,6 +376,10 @@ int mount_proc(const char *root_path)
 
 	mount("none", "/", NULL, MS_REC|MS_PRIVATE, NULL);
 	mount("none", "/proc", NULL, MS_REC|MS_PRIVATE, NULL);
+
+	if (mount_from_cfg(info) != 0) {
+		return 0;
+	}
 
 	/*
 	if (do_chroot(chroot_path) < 0) {
@@ -421,7 +441,7 @@ void jail_init(struct user_jail_struct *info, const char *user, char *pid_file, 
 	snprintf(proc_path, PATH_MAX, "%s/proc", chroot_path);
 
 	/*  remount proc directory */
-	if (mount_proc(chroot_path) != 0) {
+	if (do_mount(info, chroot_path) != 0) {
 		goto out;
 	}
 
@@ -479,7 +499,7 @@ int create_jail_ns(struct user_jail_struct *info, const char *user, char *pid_fi
 	if (unshare_err) {
 		/*  NOT support */
 		if (errno == EINVAL) {
-			return mount_proc(chroot_path);
+			return do_mount(info, chroot_path);
 		}	
 		return 1;
 	}

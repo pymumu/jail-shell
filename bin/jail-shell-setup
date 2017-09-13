@@ -15,10 +15,14 @@ JAIL_SHELL_CONF=/etc/jail-shell/jail-shell.conf
 
 get_root_dir()
 {
-	JAIL_DIR="`grep "^ *JAIL_HOME" $JAIL_SHELL_CONF | awk '{print $2}'`"
+	JAIL_DIR="`grep "^ *JAIL_HOME" $JAIL_SHELL_CONF | awk '{print $2}' 2>/dev/null`"
 	
 	if [ -z "$JAIL_DIR" ]; then
 		return 1
+	fi
+
+	if [ ! -d "$JAIL_DIR" ]; then
+		mkdir -p -m 0755 $JAIL_DIR
 	fi
 
 	JAIL_DIR="`readlink -e $JAIL_DIR`"
@@ -41,6 +45,7 @@ showhelp()
 	echo "  --install [name | all]    install jail-shell from config file."
 	echo "  --remove [name]           remove a jail-shell."
 	echo "  --clean [name]            cleanup a jail-shell."
+	echo "  --mount [name]            mount directory to a jail-shell."
 	echo "  -h, --help                show this help message."
 }
 
@@ -217,7 +222,7 @@ slink()
 cmd()
 {
 	local userinfo="$4"
-	if [ $# -lt 4 ]; then
+	if [ $# -ne 4 ]; then
 		echo "arg number is invalid"
 		return 1
 	fi
@@ -236,6 +241,36 @@ cmd()
 	fi
 }
 
+bind()
+{
+	local src
+	local dest
+	local opts
+	if [ $# -eq 3 ]; then
+		src="$1"
+		dest="$JAIL_ROOT_DIR/$2"
+		opts="$3"
+	elif [ $# -eq 2 ]; then
+		src="$JAIL_ROOT_DIR/$1"
+		dest="$JAIL_ROOT_DIR/$1"
+		opts="$2"
+	else
+		echo "arg number is invalid"
+		return 1
+	fi
+
+	mount --bind $src $dest
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+
+	mount -o remount,$opts,bind $dest
+	if [ $? -ne 0 ]; then
+		umount $dest
+		return 1
+	fi
+}
+
 add_basic_files()
 {
 	if [ ! -f "$JAIL_ROOT_DIR/etc/passwd" ]; then
@@ -247,50 +282,8 @@ add_basic_files()
 	fi
 }
 
-setup_jail()
+setup_basic_files()
 {
-	local jail_name=$1
-	local jail_cfg=$2
-	local cp_cmd=0
-	
-	if [ -z "$jail_name" ]; then
-		return 1
-	fi
-
-	if [ ! -f "$jail_cfg" ]; then
-	   return 1
-   	fi	
-
-	JAIL_COMMAND_PATH=$COMMAND_PATH/$jail_name
-	mkdir $JAIL_COMMAND_PATH 2>/dev/null
-	JAIL_ROOT_DIR="$JAIL_DIR/$jail_name"
-
-	LINE_NO=0
-	while read CMD ARGS;
-	do
-		LINE_NO=$((LINE_NO+1))
-		case "$CMD" in
-		""|\#*)
-			continue
-			;;
-		dir | file | hlink | slink | clink)
-			;;
-		cmd)
-			cp_cmd=1
-			;;
-		*)
-			echo "unknown command at line $LINE_NO: $CMD $ARGS"
-			return 1
-			;;
-		esac
-
-		$CMD $ARGS
-		if [ $? -ne 0 ]; then
-			echo "command failed at line $LINE_NO: $CMD $ARGS"
-			return 1
-		fi
-	done < $jail_cfg
-
 	if [ $cp_cmd -eq 1 ]; then
 		clink $JAIL_SHELL_HOME/jail-cmd/jail-cmd $JAIL_CMD 
 		if [ $? -ne 0 ]; then
@@ -312,6 +305,85 @@ setup_jail()
 	fi
 }
 
+process_cfg()
+{
+	local jail_name=$1
+	local jail_cfg=$2
+	local act="$3"
+	local cp_cmd=0
+	
+	if [ -z "$jail_name" ]; then
+		return 1
+	fi
+
+	if [ ! -f "$jail_cfg" ]; then
+		echo "jail config $jail_cfg is not exist."
+		return 1
+   	fi	
+
+	JAIL_COMMAND_PATH=$COMMAND_PATH/$jail_name
+	mkdir $JAIL_COMMAND_PATH 2>/dev/null
+	JAIL_ROOT_DIR="$JAIL_DIR/$jail_name"
+
+	LINE_NO=0
+	while read CMD ARGS;
+	do
+		LINE_NO=$((LINE_NO+1))
+		case "$CMD" in
+		""|\#*)
+			continue
+			;;
+		bind )
+			if [ "$act" != "mount" ]; then
+				continue;
+			fi
+			;;
+		dir | file | hlink | slink | clink)
+			if [ "$act" != "setup" ]; then
+				continue;
+			fi
+			;;
+		cmd)
+			if [ "$act" != "setup" ]; then
+				continue;
+			fi
+			cp_cmd=1
+			;;
+		*)
+			echo "unknown command at line $LINE_NO: $CMD $ARGS"
+			return 1
+			;;
+		esac
+
+		$CMD $ARGS
+		if [ $? -ne 0 ]; then
+			echo "command failed at line $LINE_NO: $CMD $ARGS"
+			return 1
+		fi
+	done < $jail_cfg
+
+	if [ "$act" = "setup" ]; then
+		setup_basic_files
+		if [ $? -ne 0 ]; then
+			return 1
+		fi
+	fi
+
+	return 0
+}
+
+setup_jail()
+{
+	local jail_name=$1
+	local jail_cfg=$2
+	
+	process_cfg $jail_name $jail_cfg "setup"
+	if [ $? -ne 0 ]; then
+		return 1;
+	fi
+}
+
+
 clean_jail() 
 {
 	JAIL_NAME="$1"
@@ -331,7 +403,7 @@ clean_jail()
 
 	fuser -k $JAIL_PATH >/dev/null
 
-	cat /proc/mounts | grep "/$JAIL_NAME/" | tac | awk '{print $2}' | xargs -i umount {} 
+	cat /proc/mounts | grep "/$JAIL_NAME[/| ]" | tac | awk '{print $2}' | uniq | xargs -i umount {} 
 	if [ $? -ne 0 ]; then
 		echo "umount directories failed."
 		return 1
@@ -434,6 +506,31 @@ install_jails()
 	return $ret
 }
 
+mount_jail()
+{
+	local ret=0
+	JAIL_NAME="$1"	
+	JAIL_CFG="$CONF_PATH/${JAIL_NAME}.cfg"
+	if [ ! -e $JAIL_CFG ]; then
+		echo "jail $JAIL_NAME doesn't exist."
+		return 1
+	fi
+
+	JAIL_ROOT_DIR="$JAIL_DIR/$jail_name"
+	if [ ! -d "$JAIL_ROOT_DIR" ]; then
+		echo "jail $JAIL_NAME is not installed"
+		return 1
+	fi	
+
+	process_cfg $JAIL_NAME $JAIL_CFG "mount"
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+	
+	return 0
+
+}
+
 list_jail() 
 {
 	for JAIL_CFG in `ls $CONF_PATH/*.cfg 2>/dev/null`
@@ -441,16 +538,16 @@ list_jail()
 		JAIL_NAME="`basename $JAIL_CFG .cfg`"
 		echo -n "$JAIL_NAME"
 		if [ -d "$JAIL_DIR/$JAIL_NAME" ]; then
-			echo -e "\t\t Installed"
+			printf "\t\t Installed\n"
 		else
-			echo -e "\t\t Not Install"
+			printf "\t\t Not Install\n"
 		fi
 	done	
 }
 
 main()
 {
-	OPTS=`getopt -o h --long help,install:,remove:,clean:,list \
+	OPTS=`getopt -o h --long help,install:,remove:,clean:,mount:,list \
 		-n  "" -- "$@"`
 
 	if [ $# -eq 0 ]; then
@@ -460,7 +557,7 @@ main()
 
 	get_root_dir
 	if [ $? -ne 0 ]; then
-		echo "Please config JAIL_HOME path at file '/etc/security/jail-shell.conf'"
+		echo "Please config JAIL_HOME path at file '$JAIL_SHELL_CONF'"
 		return 1
 	fi
 
@@ -478,15 +575,19 @@ main()
 		--install )
 			install_jails $2
 			return $?
-			shift ;;
+			shift 2;;
 		--remove )
 			remove_jail $2
 			return $?
-			shift ;;
+			shift 2;;
 		--clean )
 			clean_jails $2
 			return $?
-			shift ;;
+			shift 2;;
+		--mount )
+			mount_jail $2
+			return $?
+			shift 2;;
 		--list )
 			list_jail
 			return 0
