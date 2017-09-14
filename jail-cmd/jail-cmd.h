@@ -45,7 +45,7 @@
 	_max1 > _max2 ? _max1 : _max2; })
 
 #define JAIL_KEY          "JSID"
-#define JAIL_JSID_FILE "/var/run/jail-shell/jsid-%s"
+#define JAIL_JSID_FILE "/var/local/jail-shell/jsid/jsid-%s"
 #define MAX_LINE_LEN    1024
 
 typedef enum CMD_MSG_TYPE {

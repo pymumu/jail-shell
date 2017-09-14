@@ -8,7 +8,7 @@
 #include <fcntl.h>
 
 #define PID_FILE_PATH "/var/run/jail-cmdd.pid"
-#define DEFAULT_ROOT_DIR "/usr/local/jail-shell/command"
+#define DEFAULT_ROOT_DIR "/var/local/jail-shell/command"
 
 struct cmdd_context {
 	int sock;

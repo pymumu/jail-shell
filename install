@@ -52,8 +52,7 @@ clean_service()
 
 install_files()
 {
-	install -v -d $JAIL_SHELL_HOME_DIR/command \
-		$JAIL_SHELL_HOME_DIR/jail-cmd/ $JAIL_SHELL_CONF_DIR/jail-config \
+	install -v -d $JAIL_SHELL_HOME_DIR/jail-cmd/ $JAIL_SHELL_CONF_DIR/jail-config \
 		$JAIL_SHELL_CONF_DIR $JAIL_SHELL_HOME_DIR/rootfs $JAIL_SHELL_HOME_DIR/bin
 	if [ $? -ne 0 ]; then
 		return 1
@@ -84,12 +83,12 @@ install_files()
 		return 1
 	fi
 
-	install -v -m 0600 -t  $PREFIX/etc/security pam_jail_shell/jail-shell.conf 
+	install -v -m 0600 -t  $PREFIX/$JAIL_SHELL_CONF_DIR pam_jail_shell/jail-shell.conf 
 	if [ $? -ne 0 ]; then
 		return 1
 	fi
 
-	ln -v -f -s /etc/security/jail-shell.conf $JAIL_SHELL_CONF_DIR/jail-shell.conf
+	ln -v -f -s  $JAIL_SHELL_CONF_DIR/jail-shell.conf /etc/security/jail-shell.conf
 	if [ $? -ne 0 ]; then
 		return 1
 	fi
@@ -168,7 +167,12 @@ uninstall_jail_shell()
 		stop_service
 	fi	
 	rm -fr $JAIL_SHELL_HOME_DIR
-	rm -fr $JAIL_SHELL_CONF_DIR
+	rm -fr $JAIL_SHELL_CONF_DIR/jail-shell.conf
+	rm -fr $JAIL_SHELL_CONF_DIR/cmd_config 
+	rm -fr $JAIL_SHELL_CONF_DIR/cmdd_config
+	rm -fr $JAIL_SHELL_CONF_DIR/jail-config/default-jail.cfg
+	rmdir  $JAIL_SHELL_CONF_DIR/jail-config 2>/dev/null
+	rmdir  $JAIL_SHELL_CONF_DIR 2>/dev/null
 	rm -fr $JAIL_SHELL_INIT_DIR/jail-shell
 	rm -fr $PREFIX/usr/sbin/jail-cmdd
 	rm -fr $PREFIX/usr/sbin/jail-shell
@@ -180,6 +184,8 @@ uninstall_jail_shell()
 	if [ -z "$PREFIX" ]; then
 		clean_service
 	fi	
+
+	echo "jail home /var/local/jail-shell is not deleted, please check and delete manually."
 }
 
 
@@ -210,7 +216,7 @@ init_dir()
 	JAIL_SHELL_INIT_DIR=$PREFIX/etc/init.d
 	LIB_DIR=$PREFIX"`ldd /bin/sh | grep libc | awk '{print $3}' | xargs dirname`"
 	SECURITY_DIR=$LIB_DIR/security
-	which systemctl 2>/dev/null
+	which systemctl >/dev/null 2>&1
 	ISSYSTEMD="$?"
 
 	cd $INST_DIR

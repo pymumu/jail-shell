@@ -7,7 +7,8 @@ JAIL_DIR=
 JAIL_ROOT_DIR=
 CONF_PATH=/etc/jail-shell/jail-config
 JAIL_SHELL_HOME=/usr/local/jail-shell
-COMMAND_PATH=$JAIL_SHELL_HOME/command
+JAIL_VAR_DIR=/var/local/jail-shell
+COMMAND_PATH=$JAIL_VAR_DIR/command
 JAIL_COMMAND_PATH=
 JAIL_CMD=/usr/bin/jail-cmd
 ELF_FILE_LIST="`mktemp`"
@@ -15,7 +16,7 @@ JAIL_SHELL_CONF=/etc/jail-shell/jail-shell.conf
 
 get_root_dir()
 {
-	JAIL_DIR="`grep "^ *JAIL_HOME" $JAIL_SHELL_CONF | awk '{print $2}' 2>/dev/null`"
+	JAIL_DIR="`grep "^ *JAIL_HOME " $JAIL_SHELL_CONF | awk '{print $2}' 2>/dev/null`"
 	
 	if [ -z "$JAIL_DIR" ]; then
 		return 1
@@ -322,7 +323,15 @@ process_cfg()
    	fi	
 
 	JAIL_COMMAND_PATH=$COMMAND_PATH/$jail_name
-	mkdir $JAIL_COMMAND_PATH 2>/dev/null
+
+	if [ ! -d "$JAIL_COMMAND_PATH" ]; then
+		mkdir -m 0755  -p $JAIL_COMMAND_PATH
+		if [ $? -ne 0 ]; then
+			echo "create jail dir $JAIL_COMMAND_PATH failed."
+			return 1
+		fi
+	fi
+
 	JAIL_ROOT_DIR="$JAIL_DIR/$jail_name"
 
 	LINE_NO=0
@@ -538,7 +547,7 @@ list_jail()
 		JAIL_NAME="`basename $JAIL_CFG .cfg`"
 		echo -n "$JAIL_NAME"
 		if [ -d "$JAIL_DIR/$JAIL_NAME" ]; then
-			printf "\t\t Installed\n"
+			printf "\t\t Installed\t$JAIL_DIR/$JAIL_NAME\n"
 		else
 			printf "\t\t Not Install\n"
 		fi

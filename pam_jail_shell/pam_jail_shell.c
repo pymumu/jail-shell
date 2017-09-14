@@ -36,10 +36,11 @@
 #define PAM_EXTERN
 #endif
 
-#define JAIL_CONF_PATH "/etc/security/jail-shell.conf"
+#define JAIL_CONF_PATH "/etc/jail-shell/jail-shell.conf"
 #define NS_PID_FILE_PATH "/var/run/jail-shell-ns-%s.pid"
-#define JAIL_VAR_DIR "/var/run/jail-shell"
-#define JAIL_JSID_FILE "/var/run/jail-shell/jsid-%s"
+#define JAIL_VAR_DIR "/var/local/jail-shell"
+#define JAIL_VAR_JSID_DIR "/var/local/jail-shell/jsid"
+#define JAIL_JSID_FILE "/var/local/jail-shell/jsid/jsid-%s"
 #define MOUNT_SCRIPT_PATH "/usr/local/jail-shell/bin/jail-shell-setup"
 
 #define TMP_BUFF_LEN_32   32
@@ -54,7 +55,7 @@ extern char *program_invocation_name;
 struct user_jail_struct {
 	char name[MAX_FIELD_LEN];
 	char jail[MAX_FIELD_LEN];
-	int pid_namespace;
+	int namespace_flag;
 };
 
 struct user_jail_struct user_jail[MAX_USER_INFO_LEN];
@@ -116,6 +117,25 @@ struct cap_drop_struct cap_drop[] =
 #ifdef CAP_WAKE_ALARM
 	{"CAP_WAKE_ALARM",       CAP_WAKE_ALARM,       0},
 #endif
+};
+
+enum {
+	FLAG_NEWIPC = 0,
+	FLAG_NEWNET,
+	FLAG_NEWNS,
+	FLAG_NEWPID,
+	FLAG_NEWUSER,
+	FLAG_NEWUTS,
+};
+
+char *const namespace_opt[] = {
+	[FLAG_NEWIPC]  = "ipc",
+	[FLAG_NEWNET]  = "net",
+	[FLAG_NEWNS]   = "mnt",
+	[FLAG_NEWPID]  = "pid",
+	[FLAG_NEWUSER] = "user",
+	[FLAG_NEWUTS]  = "uts",
+	NULL
 };
 
 int cap_drop_size = sizeof(cap_drop) / sizeof(struct cap_drop_struct);
@@ -188,14 +208,58 @@ int only_one_process(const char *proc_dir)
 	return is_one_process;
 }
 
+int get_namespace_flag(char *namespace, int max_len) 
+{
+#ifdef __NR_setns
+	int flag = 0;
+	char *value;
+	char optarg[MAX_FIELD_LEN];
+	char *subopts = optarg;
+
+	strncpy(optarg, namespace, max_len);
+
+	while (*subopts != '\0') {
+		switch (getsubopt(&subopts, namespace_opt, &value)) {
+		case FLAG_NEWIPC:
+			flag |= CLONE_NEWIPC;
+			break;
+		case FLAG_NEWNET:
+			flag |= CLONE_NEWNET;
+			break;
+		case FLAG_NEWNS:
+			flag |= CLONE_NEWNS;
+			break;
+		case FLAG_NEWPID:
+			flag |= CLONE_NEWPID;
+			break;
+		case FLAG_NEWUSER:
+			flag |= CLONE_NEWUSER;
+			break;
+		case FLAG_NEWUTS:
+			flag |= CLONE_NEWUTS;
+			break;
+		default:
+			return -1;
+			break;
+		}
+	}
+
+	return flag;
+#else
+	return 0;
+#endif
+}
+
 int load_config(void)
 {
 	FILE *fp;
+	int ret = 0;
 	char line[MAX_LINE_LEN];
 	char filed1[MAX_FIELD_LEN];
 	char filed2[MAX_FIELD_LEN];
 	char filed3[MAX_FIELD_LEN];
 	int filedNum = 0;
+	int flag = -1;
 
 	fp = fopen(JAIL_CONF_PATH, "r");
 	if (fp == NULL) {
@@ -215,25 +279,24 @@ int load_config(void)
 			strncpy(jail_home, filed2, MAX_FIELD_LEN);
 		} else if (filedNum == 3) {
 			struct user_jail_struct *info;
-			int value;
 			if (filed1[0] == '#') {
 				continue;
 			}
 			info = &user_jail[user_jail_number];
 			strncpy(info->name, filed1, MAX_FIELD_LEN);
 			strncpy(info->jail, filed2, MAX_FIELD_LEN);
-			value = atoi(filed3);
-			if (value) {
-				info->pid_namespace = 1;
-			} else {
-				info->pid_namespace = 0;
+			flag = get_namespace_flag(filed3, MAX_FIELD_LEN);
+			if (flag == -1) {
+				ret = 1;
+				break;
 			}
+			info->namespace_flag = flag;
 			user_jail_number++;
 		}
 	}
 
 	fclose(fp);
-	return 0;
+	return ret;
 }
 
 struct user_jail_struct *get_user_jail(pam_handle_t *pamh) 
@@ -495,14 +558,15 @@ int create_jail_ns(struct user_jail_struct *info, const char *user, char *pid_fi
 	int fd = -1;
 	char buff[TMP_BUFF_LEN_32];
 
-	unshare_err = unshare(CLONE_NEWPID | CLONE_NEWNS);
+#ifdef __NR_setns
+	unshare_err = unshare(info->namespace_flag);
 	if (unshare_err) {
-		/*  NOT support */
-		if (errno == EINVAL) {
-			return do_mount(info, chroot_path);
-		}	
 		return 1;
 	}
+#else
+	/*  NOT support */
+	return do_mount(info, chroot_path);
+#endif
 
 	pid = fork();
 	if (pid < 0) {
@@ -589,8 +653,13 @@ int enter_jail_ns(struct user_jail_struct *info, const char *user, char *pid_fil
 		ret = 1;
 		goto out;
 	}
+#ifdef __NR_setns
+	if (enter_ns(ns_pid, "ipc", CLONE_NEWIPC) != 0) {
+		ret = 1;
+		goto out;
+	}
 
-	if (enter_ns(ns_pid, "pid", CLONE_NEWPID) != 0) {
+	if (enter_ns(ns_pid, "net", CLONE_NEWNET) != 0) {
 		ret = 1;
 		goto out;
 	}
@@ -600,7 +669,25 @@ int enter_jail_ns(struct user_jail_struct *info, const char *user, char *pid_fil
 		goto out;
 	}
 
+	if (enter_ns(ns_pid, "pid", CLONE_NEWPID) != 0) {
+		ret = 1;
+		goto out;
+	}
+
+	if (enter_ns(ns_pid, "user", CLONE_NEWUSER) != 0) {
+		ret = 1;
+		goto out;
+	}
+
+	if (enter_ns(ns_pid, "uts", CLONE_NEWUTS) != 0) {
+		ret = 1;
+		goto out;
+	}
+
 	ret = 0;
+#else
+	ret = 1;
+#endif
 out:
 	if (fd > 0) {
 		close(fd);
@@ -620,7 +707,8 @@ int set_jsid_env(pam_handle_t *pamh, struct user_jail_struct *info, const char *
 	int create_gid = 0;
 	int ret;
 
-	mkdir(JAIL_VAR_DIR, 0700);
+	mkdir(JAIL_VAR_DIR, 0755);
+	mkdir(JAIL_VAR_JSID_DIR, 0700);
 	
 	snprintf(pid_file, MAX_LINE_LEN, NS_PID_FILE_PATH, user);
 	snprintf(jsid_file_path, PATH_MAX, JAIL_JSID_FILE, user);
