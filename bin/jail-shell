@@ -2,22 +2,229 @@
 #
 # Copyright (C) 2017 Ruilin Peng (Nick) <pymumu@gmail.com>
 #
+
+JAIL_SETUP_SCRIPT="/usr/local/jail-shell/bin/jail-shell-setup"
+JAIL_CONFIG_FILE="/etc/jail-shell/jail-shell.conf"
+CONF_PATH="/etc/jail-shell/jail-config"
+
 showhelp()
 {
-	echo "Usage: jail-shell [OPTION]"
+	echo "Usage: jail-shell [user | jail | config ] [OPTION]"
 	echo "Options:"
-	echo "  -a | --add      add a user to jialed-shell."
-	echo "  -d | --del      del a user from jail-shell."
-	echo "  -n | --name     jail-shell name."
-	echo "  -c | --config   config file."
-	echo "  --disable       disable jail-shell feature."
-	echo "  --enable        enable jail-shell feature."
+	echo " user [option]"
+	echo "   -l | --list                      list jail users."
+	echo "   -a | --add [user | group]        add a user or group to jail-shell, start with '@' means group."
+	echo "   -d | --del [user | group]        del a user or group from jail-shell. start with '@' means group."
+	echo "   -n | --namespace [namespace]     user namespace: mnt,pid,ipc,net,uts."
+	echo "   -j | --jail [jail name ]         jail shell name."
+	echo ""
+	echo " jail [option]"
+	echo "   -l | --list                      list jail names."
+	echo "   -i | --install                   install a jail shell."
+	echo "   -r | --remove                    remove a jail shell."
+	echo "   -c | --clean                     clean up a jail shell."
+	echo "   -j | --jail [ jail name ]        jail shell name ."
 	echo "example:"
 	echo "  add user:  jail-shell -a user -n \"default\" -c default.cfg"
 	echo "  del user:  jail-shell -d user"
 }
 
-main()
+is_user_exist()
+{
+	user="$1"
+
+	grep "^ *$user[[:space:]]" $JAIL_CONFIG_FILE >/dev/null 2>&1
+	return $?
+}
+
+is_namespace_valid()
+{
+	local namespace=$1
+	local ret=0
+	OIFS=$IFS
+	IFS=","
+	for f in $namespace
+	do
+		case "$f" in
+		mnt|ipc|net|pid|uts|none)
+			continue
+			;;
+		* )
+			ret=1
+			break
+			;;
+		esac
+			
+	done
+	IFS=$OIFS
+
+	return $ret
+}
+
+is_jail_exist()
+{
+	local jail=$1
+	JAIL_CFG="$CONF_PATH/${jail}.cfg"
+	if [ ! -e $JAIL_CFG ]; then
+		return 1
+	fi	
+
+	return 0	
+}	
+
+user()
+{
+	local act="none"
+	local jail=""
+	local namespace="mnt,pid"
+	local user=""
+	OPTS=`getopt -o la:d:n:j: --long list,add:del:namespace:jail: \
+		-n  "" -- "$@"`
+
+	if [ $? != 0 ] ; then echo "Terminating..." >&2 ; exit 1 ; fi
+
+	# Note the quotes around `$TEMP': they are essential!
+	eval set -- "$OPTS"
+
+	while true; do
+		case "$1" in
+		-l | --list)
+			act="LIST"
+			shift ;;
+		-a | --add )
+			act="ADD"
+			user="$2"
+			shift 2;;
+		-d | --del)
+			act="DEL"
+			user="$2"
+			shift 2;;
+		-n | --namespace )
+			namespace="$2"
+			shift 2;;
+		-j | --jail)
+			jail="$2"
+			shift 2;;
+		-- ) shift; break ;;
+		* ) break ;;
+  		esac
+	done
+
+	if [ "$act" = "LIST" ]; then
+		printf "%-24s %-24s %-24s\n" "[User]" "[Jail]" "[Namespace]"
+		while read USER JAIL NAMESPACE
+		do
+			case "$USER" in
+			""|\#*)
+				continue
+				;;
+			esac
+
+			if [ -z "$NAMESPACE" ]; then
+				continue
+			fi
+			printf "%-24s %-24s %-24s\n" "$USER" "$JAIL" "$NAMESPACE"
+		done < $JAIL_CONFIG_FILE
+	elif [ "$act" = "ADD" ]; then
+		is_user_exist $user
+		if [ $? -eq 0 ]; then
+			echo "user $user exists."
+			return 1
+		fi
+
+		is_namespace_valid $namespace
+		if [ $? -ne 0 ]; then
+			echo "namespace is invalid."
+			return 1
+		fi
+
+		if [ -z "$jail" ]; then
+			echo "please input jail name"
+			return 1
+		fi
+
+		is_jail_exist $jail
+		if [ $? -ne 0 ]; then
+			echo "jail $jail is not exist."
+			return 1
+		fi
+
+		printf "%-24s %-24s %-24s\n" "$user" "$jail" "$namespace" >> $JAIL_CONFIG_FILE
+		if [ $? -ne 0 ]; then
+			echo "add config failed."
+			return 1
+		fi
+		return 0
+	elif [ "$act" = "DEL" ]; then
+		is_user_exist $user
+		if [ $? -ne 0 ]; then
+			echo "user $user doesn't exist."
+			return 1
+		fi
+		
+		sed -i "/^ *$user[[:space:]]/d" $JAIL_CONFIG_FILE
+		if [ $? -ne 0 ]; then
+			echo "delete user failed."
+			return 1
+		fi
+
+		return 0
+
+	else 
+		showhelp
+		return 1
+	fi
+}
+
+jail()
+{
+	local act="none"
+	local jail=""
+	OPTS=`getopt -o lircj: --long list,install,remove,clean,jail: \
+		-n  "" -- "$@"`
+
+	if [ $? != 0 ] ; then echo "Terminating..." >&2 ; exit 1 ; fi
+
+	# Note the quotes around `$TEMP': they are essential!
+	eval set -- "$OPTS"
+
+	while true; do
+		case "$1" in
+		-l | --list )
+			act="--list"
+			shift ;;
+		-i | --install)
+			act="--install"
+			shift ;;
+		-r | --remove)
+			act="--remove"
+			shift ;;
+		-c | --clean)
+			act="--clean"
+			shift ;;
+		-j | --jail)
+			jail="$2"
+			shift 2;;
+		-- ) shift; break ;;
+		* ) break ;;
+  		esac
+	done
+
+	if [ "$act" = "none" ]; then
+		showhelp
+		return
+	fi
+
+	if [ "$act" != "--list" ] && [  -z "$jail" ]; then
+		echo "Please input jail name."
+		return
+	fi		
+
+	$JAIL_SETUP_SCRIPT $act $jail
+	return $?
+}
+
+config()
 {
 	OPTS=`getopt -o h --long help \
 		-n  "" -- "$@"`
@@ -37,6 +244,41 @@ main()
 		* ) break ;;
   		esac
 	done
+}
+
+main()
+{
+	local mode="$1"
+
+	if [ $# -lt 1 ]; then
+		showhelp
+		return $?
+	fi
+
+	shift 1
+
+	case "$mode" in
+	user)
+		user $@
+		return $?
+		;;
+	jail)
+		jail $@
+		return $?
+		;;
+	config)
+		config $@
+		return $?
+		;;
+	help)
+		showhelp
+		return $?
+		;;
+	*)
+		showhelp
+		return $?
+		;;
+	esac
 }
 
 main $@

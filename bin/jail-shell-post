@@ -1,0 +1,49 @@
+#!/bin/sh
+# 
+# shell ARGS:
+# $1: login user name
+# $2: jail root path
+#
+
+USER="$1"
+ROOT_DIR="$2"
+
+add_user_passwd()
+{
+	passwd_file="$ROOT_DIR/etc/passwd"
+
+	if [ -z "$USER" ] || [ ! -d "$ROOT_DIR" ]; then
+		return 0
+	fi
+
+	if [ ! -f "$passwd_file" ]; then
+		return 1
+	fi
+
+	grep "^$USER:" /etc/passwd >/dev/null 2>&1
+	if [ $? -eq 0 ]; then
+		return 0
+	fi
+	
+	USER_ID="`id -u $USER 2>/dev/null`"
+	GROUP_ID="`id -g $USER 2>/dev/null`"
+
+	if [  -z "$USER_ID" ] || [ -z "$GROUP_ID" ]; then
+		return 1
+	fi
+
+	echo "$USER:x:$USER_ID:$GROUP_ID:/home/$USER:/bin/bash" >> $passwd_file
+}
+
+main()
+{
+	add_user_passwd
+	if [ $? -ne 0 ] ; then
+		return 1
+	fi	
+
+	return 0
+}
+
+main $@
+exit $?

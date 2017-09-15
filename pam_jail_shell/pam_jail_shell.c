@@ -42,6 +42,7 @@
 #define JAIL_VAR_JSID_DIR "/var/local/jail-shell/jsid"
 #define JAIL_JSID_FILE "/var/local/jail-shell/jsid/jsid-%s"
 #define MOUNT_SCRIPT_PATH "/usr/local/jail-shell/bin/jail-shell-setup"
+#define LOGIN_POST_SCRIPT "/usr/local/jail-shell/bin/jail-shell-post"
 
 #define TMP_BUFF_LEN_32   32
 #define MAX_LINE_LEN      4096
@@ -126,6 +127,7 @@ enum {
 	FLAG_NEWPID,
 	FLAG_NEWUSER,
 	FLAG_NEWUTS,
+	FLAG_NONE,
 };
 
 char *const namespace_opt[] = {
@@ -135,6 +137,7 @@ char *const namespace_opt[] = {
 	[FLAG_NEWPID]  = "pid",
 	[FLAG_NEWUSER] = "user",
 	[FLAG_NEWUTS]  = "uts",
+	[FLAG_NONE]    = "none",
 	NULL
 };
 
@@ -238,6 +241,8 @@ int get_namespace_flag(char *namespace, int max_len)
 		case FLAG_NEWUTS:
 			flag |= CLONE_NEWUTS;
 			break;
+		case FLAG_NONE:
+			return 0;
 		default:
 			return -1;
 			break;
@@ -540,7 +545,7 @@ void jail_init(struct user_jail_struct *info, const char *user, char *pid_file, 
 		sleep_cnt++;
 		sleep(1);
 
-		if (sleep_cnt % 15 == 0) {
+		if (sleep_cnt % 30 == 0) {
 			sleep_cnt = 0;
 			last_proccess = only_one_process(proc_path);
 		}
@@ -553,14 +558,15 @@ out:
 
 int create_jail_ns(struct user_jail_struct *info, const char *user, char *pid_file, const char *chroot_path)
 {
-	int unshare_err;
 	int pid;
 	int fd = -1;
 	char buff[TMP_BUFF_LEN_32];
 
 #ifdef __NR_setns
-	unshare_err = unshare(info->namespace_flag);
-	if (unshare_err) {
+	if (info->namespace_flag == 0) {
+		return do_mount(info, chroot_path);
+	}
+	if (unshare(info->namespace_flag) != 0) {
 		return 1;
 	}
 #else
@@ -858,6 +864,26 @@ int drop_cap(void)
 	return 0;
 }
 
+int run_jail_post_script(const char *user, struct user_jail_struct *info)
+{
+	int ret;
+	char post_cmd[PATH_MAX];
+
+	if (access(LOGIN_POST_SCRIPT, X_OK) != 0) {
+		return 0;
+	}
+
+	/* LOGIN_POST_SCRIPT %user% %jail_root_path%*/
+	snprintf(post_cmd, PATH_MAX, "%s %s %s/%s", LOGIN_POST_SCRIPT, user, jail_home, info->jail);
+	ret = system(post_cmd);
+	if (ret != 0) {
+		return 1;
+	}
+
+	return 0;
+
+}
+
 int start_jail(pam_handle_t *pamh, int flags, int argc, const char *argv[])
 {
 	struct user_jail_struct *info;
@@ -884,6 +910,10 @@ int start_jail(pam_handle_t *pamh, int flags, int argc, const char *argv[])
 
 	snprintf(jail_path, MAX_LINE_LEN, "%s/%s", jail_home, info->jail);
 	if (unshare_pid(info, user, jail_path) < 0) {
+		return PAM_SERVICE_ERR;
+	}
+
+	if (run_jail_post_script(user, info) != 0) {
 		return PAM_SERVICE_ERR;
 	}
 

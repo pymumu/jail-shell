@@ -542,14 +542,14 @@ mount_jail()
 
 list_jail() 
 {
+	printf "%-24s%-24s%-24s\n" "[Jail]" "[Install]" "[Root Path]"
 	for JAIL_CFG in `ls $CONF_PATH/*.cfg 2>/dev/null`
 	do
 		JAIL_NAME="`basename $JAIL_CFG .cfg`"
-		echo -n "$JAIL_NAME"
 		if [ -d "$JAIL_DIR/$JAIL_NAME" ]; then
-			printf "\t\t Installed\t$JAIL_DIR/$JAIL_NAME\n"
+			printf "%-24s%-24s%-24s\n" "$JAIL_NAME" "Installed" "$JAIL_DIR/$JAIL_NAME"
 		else
-			printf "\t\t Not Install\n"
+			printf "%-24s%-24s%-24s\n" "$JAIL_NAME" "Not Installed" "N/A"
 		fi
 	done	
 }

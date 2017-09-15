@@ -68,7 +68,7 @@ install_files()
 		return 1
 	fi
 
-	install -v -m 0755 -t $JAIL_SHELL_HOME_DIR/bin bin/jail-shell bin/jail-shell-setup 
+	install -v -m 0755 -t $JAIL_SHELL_HOME_DIR/bin bin/jail-shell bin/jail-shell-setup bin/jail-shell-post
 	if [ $? -ne 0 ]; then
 		return 1
 	fi
