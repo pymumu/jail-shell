@@ -908,12 +908,12 @@ int start_jail(pam_handle_t *pamh, int flags, int argc, const char *argv[])
 		return PAM_SERVICE_ERR;
 	}
 
-	snprintf(jail_path, MAX_LINE_LEN, "%s/%s", jail_home, info->jail);
-	if (unshare_pid(info, user, jail_path) < 0) {
+	if (run_jail_post_script(user, info) != 0) {
 		return PAM_SERVICE_ERR;
 	}
 
-	if (run_jail_post_script(user, info) != 0) {
+	snprintf(jail_path, MAX_LINE_LEN, "%s/%s", jail_home, info->jail);
+	if (unshare_pid(info, user, jail_path) < 0) {
 		return PAM_SERVICE_ERR;
 	}
 

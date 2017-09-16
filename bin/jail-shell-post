@@ -20,7 +20,7 @@ add_user_passwd()
 		return 1
 	fi
 
-	grep "^$USER:" /etc/passwd >/dev/null 2>&1
+	grep "^$USER:" $passwd_file >/dev/null 2>&1
 	if [ $? -eq 0 ]; then
 		return 0
 	fi

@@ -180,7 +180,7 @@ jail()
 {
 	local act="none"
 	local jail=""
-	OPTS=`getopt -o lircj: --long list,install,remove,clean,jail: \
+	OPTS=`getopt -o li:r:c: --long list,install:,remove:,clean: \
 		-n  "" -- "$@"`
 
 	if [ $? != 0 ] ; then echo "Terminating..." >&2 ; exit 1 ; fi
@@ -191,36 +191,28 @@ jail()
 	while true; do
 		case "$1" in
 		-l | --list )
-			act="--list"
+			$JAIL_SETUP_SCRIPT --list 
+			return $?
 			shift ;;
 		-i | --install)
-			act="--install"
-			shift ;;
+			$JAIL_SETUP_SCRIPT --install $2
+		   	return $?
+			shift 2;;
 		-r | --remove)
-			act="--remove"
-			shift ;;
+			$JAIL_SETUP_SCRIPT --remove $2
+		   	return $?
+			shift 2;;
 		-c | --clean)
-			act="--clean"
-			shift ;;
-		-j | --jail)
-			jail="$2"
+			$JAIL_SETUP_SCRIPT --clean $2
+		   	return $?
 			shift 2;;
 		-- ) shift; break ;;
 		* ) break ;;
   		esac
 	done
 
-	if [ "$act" = "none" ]; then
-		showhelp
-		return
-	fi
-
-	if [ "$act" != "--list" ] && [  -z "$jail" ]; then
-		echo "Please input jail name."
-		return
-	fi		
-
-	$JAIL_SETUP_SCRIPT $act $jail
+	showhelp
+	
 	return $?
 }
 
