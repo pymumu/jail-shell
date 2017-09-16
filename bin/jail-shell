@@ -20,16 +20,30 @@ showhelp()
 	echo ""
 	echo " jail [option]"
 	echo "   -l | --list                      list jail names."
-	echo "   -i | --install                   install a jail shell."
-	echo "   -r | --remove                    remove a jail shell."
-	echo "   -c | --clean                     clean up a jail shell."
-	echo "   -j | --jail [ jail name ]        jail shell name ."
+	echo "   -i | --install [jail name]       install a jail shell."
+	echo "   -r | --remove [jail name]        remove a jail shell."
+	echo "   -c | --clean [jail name]         clean up a jail shell."
+	echo "   -e | --edit [jail name]          create and or edit jail shell configuration."
+	echo "   -d | --delete [jail name]        delete jail configuration."
+	echo ""
 	echo "example:"
-	echo "  add user:  jail-shell -a user -n \"default\" -c default.cfg"
-	echo "  del user:  jail-shell -d user"
+	echo " user operation:"
+	echo "   add user:  jail-shell user -a user -j jail -n mnt,pid"
+	echo "   add group: jail-shell user -a @group -j jail -n mnt,pid"
+	echo "   del user:  jail-shell -d user"
+	echo " jail operation:"
+	echo "   install jail: jail-shell jail -i jail"
+	echo "   remove jail: jail-shell jail -r jail"
 }
 
 is_user_exist()
+{
+	id -u $1 >/dev/null 2>&1
+	return $?
+
+}
+
+is_user_added()
 {
 	user="$1"
 
@@ -127,6 +141,13 @@ user()
 		done < $JAIL_CONFIG_FILE
 	elif [ "$act" = "ADD" ]; then
 		is_user_exist $user
+		if [ $? -ne 0 ]; then
+			echo "user $user doesn't exists."
+			echo "please add user with 'useradd' to system first."
+			return 1
+		fi
+
+		is_user_added $user
 		if [ $? -eq 0 ]; then
 			echo "user $user exists."
 			return 1
@@ -180,7 +201,7 @@ jail()
 {
 	local act="none"
 	local jail=""
-	OPTS=`getopt -o li:r:c: --long list,install:,remove:,clean: \
+	OPTS=`getopt -o li:r:c:e:d: --long list,install:,remove:,clean:edit:,delete: \
 		-n  "" -- "$@"`
 
 	if [ $? != 0 ] ; then echo "Terminating..." >&2 ; exit 1 ; fi
@@ -205,6 +226,62 @@ jail()
 		-c | --clean)
 			$JAIL_SETUP_SCRIPT --clean $2
 		   	return $?
+			shift 2;;
+		-e | --edit)
+			JAIL="$2"
+			JAIL_CFG="$CONF_PATH/${JAIL}.cfg"
+			JAIL_SAMPLE=""
+			if [ ! -f "$JAIL_CFG" ]; then
+				if [ -h "/bin" ]; then
+					JAIL_SAMPLE="$CONF_PATH/jail-bin-symbolic-link.cfg.sample" 
+				else 
+					JAIL_SAMPLE="$CONF_PATH/jail.cfg.sample" 
+				fi
+				
+				cp $JAIL_SAMPLE $JAIL_CFG -a
+				if [ $? -ne 0 ]; then
+					echo "copy sample at $CONF_PATH failed."
+					return 1
+				fi
+	
+				
+			fi
+
+			vi $JAIL_CFG
+
+			# File is not edited.
+			if [ ! -z "$JAIL_SAMPLE" ]; then
+				if [ "`stat -c %Y $JAIL_SAMPLE`" = "`stat -c %Y $JAIL_CFG`" ]; then
+					rm $JAIL_CFG	
+					echo "Jail not saved, you can run vi command :w! to save."
+					return 1
+				fi
+			fi
+
+			echo "please run 'jail-shell jail -i $JAIL' to install jail."
+
+			return 0
+			shift 2;;
+		-d | --delete)
+			JAIL="$2"
+			JAIL_CFG="$CONF_PATH/${JAIL}.cfg"
+			is_jail_exist $JAIL
+			if [ $? -ne 0 ]; then
+				echo "jail $JAIL doesn't exist."
+				return 1
+			fi
+
+			$JAIL_SETUP_SCRIPT --remove $2 >/dev/null 2>&1
+
+			rm -f $JAIL_CFG
+			if [ $? -ne 0 ]; then
+				echo "delete jail configuration failed."
+				return 1
+			fi
+
+			echo "delete $JAIL success."
+
+			return 0
 			shift 2;;
 		-- ) shift; break ;;
 		* ) break ;;

@@ -220,15 +220,22 @@ slink()
 	ln -f -s $1 $JAIL_ROOT_DIR/$2
 }
 
+node()
+{
+	if [ $# -ne 6 ]; then
+		return 1
+	fi
+
+	mknod $JAIL_ROOT_DIR/$1 $2 $3 $4 -m $5
+	chown $6 $JAIL_ROOT_DIR/$1
+}
+
 cmd()
 {
-	local userinfo="$4"
-	if [ $# -ne 4 ]; then
+	if [ $# -ne 3 ]; then
 		echo "arg number is invalid"
 		return 1
 	fi
-	user=${userinfo##*:}
-	group=${userinfo#*:}
 
 	ln -f -s $JAIL_CMD $JAIL_ROOT_DIR/$1
 	if [ $? -ne 0 ]; then
@@ -347,7 +354,7 @@ process_cfg()
 				continue;
 			fi
 			;;
-		dir | file | hlink | slink | clink)
+		dir | file | hlink | slink | clink | node)
 			if [ "$act" != "setup" ]; then
 				continue;
 			fi

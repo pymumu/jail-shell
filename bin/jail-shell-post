@@ -1,5 +1,5 @@
 #!/bin/sh
-# 
+# this script is called by pam_jail_shell.so when user login.
 # shell ARGS:
 # $1: login user name
 # $2: jail root path
@@ -19,17 +19,22 @@ add_user_passwd()
 	if [ ! -f "$passwd_file" ]; then
 		return 1
 	fi
-
-	grep "^$USER:" $passwd_file >/dev/null 2>&1
-	if [ $? -eq 0 ]; then
-		return 0
-	fi
 	
 	USER_ID="`id -u $USER 2>/dev/null`"
 	GROUP_ID="`id -g $USER 2>/dev/null`"
 
 	if [  -z "$USER_ID" ] || [ -z "$GROUP_ID" ]; then
 		return 1
+	fi
+
+	if [ ! -d "$ROOT_DIR/home/$USER" ]; then
+		mkdir $ROOT_DIR/home/$USER
+		chown $USER_ID:$GROUP_ID $ROOT_DIR/home/$USER
+	fi
+
+	grep "^$USER:" $passwd_file >/dev/null 2>&1
+	if [ $? -eq 0 ]; then
+		return 0
 	fi
 
 	echo "$USER:x:$USER_ID:$GROUP_ID:/home/$USER:/bin/bash" >> $passwd_file
