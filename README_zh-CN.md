@@ -174,7 +174,7 @@ OPTION: rw,ro,dev,nodev,exec,noexec
 
 - **cmd: 执行系统内命令**  
   * 参数：  
-`cmd SRC DEST MODE RUN_AS_USER`  
+`cmd SRC DEST RUN_AS_USER`  
 RUN_AS_USER: 指定执行命令的用户，-:-表示chroot环境中的用户。  
   * 例子：  
 `cmd /usr/bin/passwd /usr/bin/passwd -:- `  
