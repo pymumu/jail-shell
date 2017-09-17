@@ -59,7 +59,7 @@ jail-shell安全受限shell是一个Linux环境下的安全工具，主要使用
 
 **说明**
 1. 用户通过ssh, 终端，telnet等shell管理工具登录到系统后，pam_jail_shell插件根据配置列表，将登录用户的访问范围限制在指定的chroot环境中。
-2. 管理员通过jail-shel命令，管理受限用户名单列表，以及管理chroot环境的命令列表，并配置目录的访问范围。
+2. 管理员通过jail-shell命令，管理受限用户名单列表，以及管理chroot环境的命令列表，并配置目录的访问范围。
 3. jail-cmd代理用户执行的系统命令，辅助实现必要的业务功能。
 
 
@@ -86,9 +86,9 @@ sudo /usr/local/jail-shell/install -u
 ==============
 安装完成后，可使用jail-shell命令管理安全受限shell，通过`jail-shell -h`查看命令帮助  
 在使用上，步骤如下：  
-1. 使用useradd命令添加用户到系统中。
-2. 使用jail-shell jail创建安全受限shell配置，并创建受限运行环境。
-3. 使用jail-shell user将用户添加到受限系统中。
+1. 使用`useradd username`命令添加用户到系统中。
+2. 使用`jail-shell jail`创建安全受限shell配置，并创建受限运行环境。
+3. 使用`jail-shell user`将用户添加到受限系统中。
 
 使用举例
 -------------
@@ -126,45 +126,62 @@ ssh test@127.0.0.1
 此配置文件用于生成制定的jail，将需要的文件，命令复制到jail中。  
 配置支持如下命令：
 - **dir: 创建目录**  
-  参数：`dir PATH MODE OWNER`  
-  例子：`dir /bin/ 0755 root:root`  
+  * 参数：  
+`dir PATH MODE OWNER`  
+  * 例子：  
+`dir /bin/ 0755 root:root`  
 
 - **file: 复制文件**  
-  参数：`file SRC DEST MODE OWNER`  
-  例子：`file /etc/nsswitch.conf /etc/nsswitch.conf 0644 root:root`
+  * 参数：  
+`file SRC DEST MODE OWNER`  
+  * 例子：  
+`file /etc/nsswitch.conf /etc/nsswitch.conf 0644 root:root`
 
 - **hlink: 创建硬链接文件**  
-  参数：`hlink SRC DEST `  
-  例子：`hlink /etc/localtime /etc/localtime`  
+  * 参数：  
+`hlink SRC DEST `  
+  * 例子：  
+`hlink /etc/localtime /etc/localtime`  
 
 - **slink: 创建符号连接**  
-  参数：`slink TARGET LINKNAME`  
-  例子：`slink /bin/bash /bin/sh`
+  * 参数：  
+`slink TARGET LINKNAME`  
+  * 例子：  
+`slink /bin/bash /bin/sh`
 
 - **clink: 先硬连接创建文件，若失败则复制文件**  
-  参数：`clink SRC DEST `  
-  例子：`clink /etc/localtime /etc/localtime`  
+  * 参数：  
+`clink SRC DEST `  
+  * 例子：  
+`clink /etc/localtime /etc/localtime`  
 
 - **node: 创建设备文件**  
-  参数：`node PATH TYPE MAJON MINOR MODE OWNER`  
-  例子：`node /dev/null c 1 3 666 root:root`  
-  安全说明：  
-        应该避免添加块设备文件。
+  * 参数：  
+`node PATH TYPE MAJON MINOR MODE OWNER`  
+  * 例子：  
+`node /dev/null c 1 3 666 root:root`  
+  * 安全说明：  
+应该避免添加块设备文件。
 
 - **bind: 绑定映射目录**  
-  参数：`bind [SRC] DEST OPTION`  
-        OPTION: rw,ro,dev,nodev,exec,noexec  
-        查阅`man mount`获取参数说明   
-  例子：`bind / ro,nodev,nosuid`  
-        `bind /opt/ /opt/ ro,nodev,noexec`  
+  * 参数：  
+`bind [SRC] DEST OPTION`  
+OPTION: rw,ro,dev,nodev,exec,noexec  
+查阅`man mount`获取参数说明   
+  * 例子：  
+`bind / ro,nodev,nosuid`  
+`bind /opt/ /opt/ ro,nodev,noexec`  
 
 - **cmd: 执行系统内命令**  
-  参数：`cmd SRC DEST MODE RUN_AS_USER`  
-  例子：`cmd /usr/bin/passwd /usr/bin/passwd -:- `  
-        `cmd /some/root/command /some/root/command root:root`  
-        `cmd /some/user/command /some/user/command user:user `  
-  安全说明：  
-        此通道可能导致用户从chroot环境中逃狱，所以，添加的命令必须避免被注入。  
+  * 参数：  
+`cmd SRC DEST MODE RUN_AS_USER`  
+RUN_AS_USER: 指定执行命令的用户，-:-表示chroot环境中的用户。  
+  * 例子：  
+`cmd /usr/bin/passwd /usr/bin/passwd -:- `  
+`cmd /some/root/command /some/root/command root:root`  
+`cmd /some/user/command /some/user/command user:user `  
+  * 安全说明：  
+此通道可能导致用户从chroot环境中逃狱，所以，添加的命令必须避免被注入。  
 
 安全注意事项
 -------------
@@ -188,6 +205,23 @@ ssh test@127.0.0.1
 |`/var/local/jail-shell/`          |受限安全shell数据目录                                            |
 |`/var/local/jail-shell/jails`     |受限安全shell chroot运行环境目录                                 |
 |`/usr/local/jail-shell`           |jail-shell程序目录                                               |
+
+调试chroot环境
+==============
+当向chroot环境中复制命令后，复制后的命令如果执行失败，则需要调试，找出缺少的文件，并添加到chroot环境中。
+
+调试需要的工具：`strace`， 调试方法如下  
+将strace命令复制到chroot环境中，然后使用strace执行需要调试的命令，找出执行命令缺少的文件。对应的调试命令如下  
+```shell
+strace -F -eopen command
+```
+-eopen表示跟踪进程打开的文件列表， 必要时，可以不使用此参数。
+
+执行上述命令后，排查打开失败的文件列表是否在chroot环境中。
+```shell
+open("/etc/ld.so.preload", O_RDONLY)    = -1 ENOENT (No such file or directory)
+```
+如上表示：/etc/ld-so.preload文件读取时不存在，可能需要将上述文件添加到chroot环境中。这时可使用`clink`，`file`命令将缺失文件添加到chroot环境中。
 
 License
 ==============
