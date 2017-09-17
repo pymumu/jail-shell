@@ -30,7 +30,7 @@
 #include <security/pam_modules.h>
 #include <sys/prctl.h>
 
-#define MAX_GROUP_NUM  32
+#define MAX_GROUP_NUM  64
 
 #ifndef PAM_EXTERN
 #define PAM_EXTERN

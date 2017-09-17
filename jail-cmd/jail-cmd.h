@@ -31,6 +31,7 @@
 #include <libgen.h>
 
 #define TMP_BUFF_LEN_32 32
+#define TMP_BUFF_LEN_128 128
 #define SOCKET_BUFF_LEN (1024 * 32)
 #define MAX_ARGS_COUNT 1024
 
@@ -46,6 +47,7 @@
 
 #define JAIL_KEY          "JSID"
 #define JAIL_JSID_FILE "/var/local/jail-shell/jsid/jsid-%s"
+#define COMMAND_LIST_FILE "command.list"
 #define MAX_LINE_LEN    1024
 
 typedef enum CMD_MSG_TYPE {

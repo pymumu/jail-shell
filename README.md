@@ -229,12 +229,12 @@ When you copy a command to the chroot environment, if the copy command fails, yo
 Copy the `strace` command into the chroot environment, and then use `strace` to execute the commands that need to be debugged to find the missing dependent files.   
 The following debugging commands are as follows 
 ```shell 
-Strace -F -eopen command
+strace -F -eopen command
 ```
 -eopen represents a list of files that the trace process opens.  
 After executing the above command, troubleshoot to find the open file list.
 ```shell
-Open ("/etc/ld.so.preload", "O_RDONLY") = -1 ENOENT (No, such, file, or, directory)
+open ("/etc/ld.so.preload", "O_RDONLY") = -1 ENOENT (No, such, file, or, directory)
 ```
 As indicated above, the `/etc/ld-so.preload` file does not exist when reading, and may need to add the above files to the chroot environment. At this point, you can use the `clink`, `file` command to add missing files to the chroot environment. 
 

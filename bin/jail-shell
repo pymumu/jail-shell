@@ -3,6 +3,7 @@
 # Copyright (C) 2017 Ruilin Peng (Nick) <pymumu@gmail.com>
 #
 
+umask 027
 JAIL_SETUP_SCRIPT="/usr/local/jail-shell/bin/jail-shell-setup"
 JAIL_CONFIG_FILE="/etc/jail-shell/jail-shell.conf"
 CONF_PATH="/etc/jail-shell/jail-config"
@@ -20,9 +21,9 @@ showhelp()
 	echo ""
 	echo " jail [option]"
 	echo "   -l | --list                      list jail names."
-	echo "   -i | --install [jail name]       install a jail shell."
+	echo "   -i | --install [jail name | all] install a jail shell."
 	echo "   -r | --remove [jail name]        remove a jail shell."
-	echo "   -c | --clean [jail name]         clean up a jail shell."
+	echo "   -c | --clean [jail name | all]   clean up a jail shell."
 	echo "   -e | --edit [jail name]          create and or edit jail shell configuration."
 	echo "   -d | --delete [jail name]        delete jail configuration."
 	echo ""

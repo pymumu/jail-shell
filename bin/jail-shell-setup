@@ -10,9 +10,54 @@ JAIL_SHELL_HOME=/usr/local/jail-shell
 JAIL_VAR_DIR=/var/local/jail-shell
 COMMAND_PATH=$JAIL_VAR_DIR/command
 JAIL_COMMAND_PATH=
+JAIL_COMMAND_LIST_FILE="command.list"
 JAIL_CMD=/usr/bin/jail-cmd
 ELF_FILE_LIST="`mktemp`"
 JAIL_SHELL_CONF=/etc/jail-shell/jail-shell.conf
+
+
+
+showhelp()
+{
+	echo "Usage: jail-shell-setup [OPTION]"
+	echo "Options:"
+	echo "  --list                    list jail names."
+	echo "  --install [name | all]    install jail-shell from config file."
+	echo "  --remove [name]           remove a jail-shell."
+	echo "  --clean [name | all]      cleanup a jail-shell."
+	echo "  --mount [name]            mount directory to a jail-shell."
+	echo "  -h, --help                show this help message."
+}
+
+create_dir()
+{
+    local CREATE_DIR="$1"
+	local MODE="$2"
+	local OWNER="$3"
+
+	if [ $# -ne 3 ]; then
+		return 1
+	fi
+
+    CHECK_DIR="`dirname $CREATE_DIR`"
+    while [ ! -d "$CHECK_DIR" ]
+    do
+            CHMOD_DIR="$CHECK_DIR"
+            CHECK_DIR="`dirname $CHECK_DIR`"
+    done
+
+    mkdir -p  $CREATE_DIR
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+    chmod $MODE $CHMOD_DIR -R
+    chown $OWNER $CHMOD_DIR -R
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+
+	return 0
+}
 
 get_root_dir()
 {
@@ -23,7 +68,11 @@ get_root_dir()
 	fi
 
 	if [ ! -d "$JAIL_DIR" ]; then
-		mkdir -p -m 0755 $JAIL_DIR
+		create_dir $JAIL_DIR 0755 root:root
+		if [ $? -ne 0 ]; then
+			echo "create $JAIL_DIR failed"
+			return 1
+		fi
 	fi
 
 	JAIL_DIR="`readlink -e $JAIL_DIR`"
@@ -36,18 +85,6 @@ get_root_dir()
 	fi
 
 	return 0;
-}
-
-showhelp()
-{
-	echo "Usage: jail-shell-setup [OPTION]"
-	echo "Options:"
-	echo "  --list                    list jail names."
-	echo "  --install [name | all]    install jail-shell from config file."
-	echo "  --remove [name]           remove a jail-shell."
-	echo "  --clean [name]            cleanup a jail-shell."
-	echo "  --mount [name]            mount directory to a jail-shell."
-	echo "  -h, --help                show this help message."
 }
 
 link_cp()
@@ -103,7 +140,11 @@ cp_lib()
 		LIB_FILE="$FILE"
 		if [ -h "$FILE" ]; then
 			if [ ! -d "$JAIL_ROOT_DIR/$DIR" ]; then
-				mkdir -m 0755 -p $JAIL_ROOT_DIR/$DIR
+				create_dir $JAIL_ROOT_DIR/$DIR 0755 root:root
+				if [ $? -ne 0 ]; then
+					echo "create directory failed."
+					return 1
+				fi
 			fi
 			link_cp $FILE $JAIL_ROOT_DIR/$DIR
 			if [ $? -ne 0 ]; then
@@ -115,7 +156,11 @@ cp_lib()
 		fi
 		DIR="`dirname $LIB_FILE`"
 		if [ ! -d "$JAIL_ROOT_DIR/$DIR" ]; then
-			mkdir -m 0755 -p $JAIL_ROOT_DIR/$DIR
+			create_dir $JAIL_ROOT_DIR/$DIR 0755 root:root
+			if [ $? -ne 0 ]; then
+				echo "create directory failed."
+				return 1
+			fi
 		fi
 		link_cp $LIB_FILE $JAIL_ROOT_DIR/$DIR
 		if [ $? -ne 0 ]; then
@@ -232,21 +277,32 @@ node()
 
 cmd()
 {
+	local userinfo="$3"
 	if [ $# -ne 3 ]; then
 		echo "arg number is invalid"
 		return 1
 	fi
 
-	ln -f -s $JAIL_CMD $JAIL_ROOT_DIR/$1
+	user=${userinfo##*:}
+	group=${userinfo#*:}
+
+	if [ -z "$user" ] || [ -z "$group" ]; then
+		echo "user or group is invalid."
+		return 1
+	fi
+
+	ln -f -s $JAIL_CMD $JAIL_ROOT_DIR/$2
 	if [ $? -ne 0 ]; then
 		return 1
 	fi
 
-	LINK_NAME="`basename $1`"
-	ln -f -s $2 $JAIL_COMMAND_PATH/$LINK_NAME
+	LINK_NAME="`basename $2`"
+	ln -f -s $1 $JAIL_COMMAND_PATH/$LINK_NAME
 	if [ $? -ne 0 ]; then
 		return 1
 	fi
+
+	echo "$LINK_NAME $user $group" >> $JAIL_COMMAND_PATH/$JAIL_COMMAND_LIST_FILE
 }
 
 bind()
@@ -332,7 +388,7 @@ process_cfg()
 	JAIL_COMMAND_PATH=$COMMAND_PATH/$jail_name
 
 	if [ ! -d "$JAIL_COMMAND_PATH" ]; then
-		mkdir -m 0755  -p $JAIL_COMMAND_PATH
+		create_dir $JAIL_COMMAND_PATH 0755 root:root
 		if [ $? -ne 0 ]; then
 			echo "create jail dir $JAIL_COMMAND_PATH failed."
 			return 1
@@ -340,6 +396,10 @@ process_cfg()
 	fi
 
 	JAIL_ROOT_DIR="$JAIL_DIR/$jail_name"
+
+	if [ "$act" = "setup" ]; then
+		rm -f $JAIL_COMMAND_PATH/$JAIL_COMMAND_LIST_FILE
+	fi
 
 	LINE_NO=0
 	while read CMD ARGS;

@@ -8,7 +8,9 @@
 #include <fcntl.h>
 
 #define PID_FILE_PATH "/var/run/jail-cmdd.pid"
-#define DEFAULT_ROOT_DIR "/var/local/jail-shell/command"
+#define COMMAND_ROOT_PATH "/var/local/jail-shell/command"
+#define MAX_GROUP_NUM  64
+
 
 struct cmdd_context {
 	int sock;
@@ -35,7 +37,6 @@ struct cmdd_context {
 
 struct cmdd_config {
 	int port;
-	char rootdir[PATH_MAX];
 	int enable_log;
 };
 
@@ -43,7 +44,6 @@ int pid_file_fd;
 
 struct cmdd_config config = {
 	.port = DEFAULT_PORT,
-	.rootdir = DEFAULT_ROOT_DIR,
 	.enable_log = 1,
 };
 
@@ -152,10 +152,8 @@ int forksocket(int *mirror, int *mirror_err)
 	return pid;
 }
 
-int set_uid_gid(struct jail_cmd_cmd *cmd_cmd)
+int set_uid_gid(int uid, int gid)
 {
-	int uid = cmd_cmd->uid;
-	int gid = cmd_cmd->gid;
 	struct passwd *pwd;
 
 	pwd = getpwuid(uid);
@@ -188,6 +186,57 @@ errout:
 
 }
 
+int get_command_user_group(char *jail_name, char *command, char *user, int user_maxlen, char *group, int group_maxlen) 
+{
+	char command_file_path[PATH_MAX];
+	char buff[MAX_LINE_LEN];
+	char filed1[MAX_LINE_LEN];
+	char filed2[MAX_LINE_LEN];
+	char filed3[MAX_LINE_LEN];
+	int filedNum = 0;
+
+	FILE *fp = NULL;
+	snprintf(command_file_path, PATH_MAX, "%s/%s/%s", COMMAND_ROOT_PATH, jail_name, COMMAND_LIST_FILE);
+
+	fp = fopen(command_file_path, "r");
+	if (fp == NULL) {
+		fprintf(stderr, "open %s failed, %s\n", command_file_path, strerror(errno));
+		goto errout;
+	}
+
+
+	while (fgets(buff, MAX_LINE_LEN, fp)) {
+		filedNum = sscanf(buff, "%1024s %1024s %1024s", filed1, filed2, filed3);
+		if (filedNum < 0) {
+			continue;
+		}
+
+		if (filed1[0] == '#') {
+			continue;
+		}
+
+		if (filedNum != 3) {
+			continue;
+		}
+
+		if (strncmp(basename(command), filed1, MAX_LINE_LEN) != 0) {
+			continue;
+		}
+
+		strncpy(user, filed2, user_maxlen);
+		strncpy(group, filed3, group_maxlen);
+		break;
+	}
+
+	fclose(fp);
+	return 0;
+errout:
+	if (fp) {
+		fclose(fp);
+	}
+	return -1;
+}
+
 int injection_check(int argc, char *argv[])
 {
 	char *inject_char[] = {";", "|", "`", "$(", "&&", "||", ">", "<"};
@@ -200,6 +249,65 @@ int injection_check(int argc, char *argv[])
 				return 1;
 			}
 		}
+	}
+
+	return 0;
+}
+
+int change_uid_gid_by_command(struct jail_cmd_cmd *cmd_cmd, char *jail_name, char *command)
+{
+	char username[TMP_BUFF_LEN_128]={0};
+	char groupname[TMP_BUFF_LEN_128]={0};
+	int uid = cmd_cmd->uid;
+	int gid = cmd_cmd->gid;
+
+	if (get_command_user_group(jail_name, command, username, sizeof(username), groupname, sizeof(groupname)) == 0) {
+		if (strncmp(username, "-", sizeof(username)) == 0 || strncmp(groupname, "-", sizeof(groupname)) == 0) {
+			if (uid == 0 || gid == 0) {
+				errno = EPERM;
+				return -1;
+			}
+		} else {
+			struct passwd *pwd ;
+			struct group *grp;
+			gid_t groups[MAX_GROUP_NUM];
+			int ngroups = MAX_GROUP_NUM;
+			int i = 0;
+
+			pwd = getpwnam(username);
+			if (pwd == NULL) {
+				errno = EINVAL;
+				return -1;
+			}
+
+			if (getgrouplist(username, pwd->pw_gid, groups, &ngroups) < 0) {
+				return -1;
+			}
+
+			grp = getgrnam(groupname);
+			if (grp == NULL) {
+				errno = EINVAL;
+				return -1;
+			}
+
+			for (i = 0; i < ngroups; i++) {
+				if (grp->gr_gid == groups[i]) {
+					break;
+				}
+			}
+
+			if (i >= ngroups) {
+				errno = EINVAL;
+				return -1;
+			}
+
+			uid = pwd->pw_uid;
+			gid = grp->gr_gid;
+		}
+	} 
+
+	if (set_uid_gid(uid, gid) != 0) {
+		return -1;		
 	}
 
 	return 0;
@@ -228,27 +336,27 @@ void run_process(struct jail_cmd_cmd *cmd_cmd, char *jail_name)
 		goto errout;
 	}
 
-	/*  change user id */
-	if (set_uid_gid(cmd_cmd)) {
-		goto errout;
-	}
-
 	snprintf(cmd_name, PATH_MAX, "/%s", argv[0]);
 	if (normalize_path(cmd_name) <= 0) {
 		goto errout;
 	}
 
-	snprintf(cmd_path, PATH_MAX, "%s/%s%s", config.rootdir, jail_name, cmd_name);
-
-	if (chdir("/tmp") < 0) {
-		goto errout;
-	}
+	snprintf(cmd_path, PATH_MAX, "%s/%s%s", COMMAND_ROOT_PATH, jail_name, cmd_name);
 
 	len = readlink(cmd_path, prog, sizeof(prog));
 	if (len < 0) {
 		goto errout;
 	}
 	prog[len] = 0;
+
+	/*  change user id */
+	if (change_uid_gid_by_command(cmd_cmd, jail_name, cmd_name) != 0) {
+		goto errout;
+	}
+
+	if (chdir("/tmp") < 0) {
+		goto errout;
+	}
 
 	execv(prog, argv);
 
