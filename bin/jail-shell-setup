@@ -6,6 +6,7 @@
 JAIL_DIR=
 JAIL_ROOT_DIR=
 CONF_PATH=/etc/jail-shell/jail-config
+CMD_CONF=/etc/jail-shell/cmd_config
 JAIL_SHELL_HOME=/usr/local/jail-shell
 JAIL_VAR_DIR=/var/local/jail-shell
 COMMAND_PATH=$JAIL_VAR_DIR/command
@@ -14,8 +15,6 @@ JAIL_COMMAND_LIST_FILE="command.list"
 JAIL_CMD=/usr/bin/jail-cmd
 ELF_FILE_LIST="`mktemp`"
 JAIL_SHELL_CONF=/etc/jail-shell/jail-shell.conf
-
-
 
 showhelp()
 {
@@ -348,10 +347,14 @@ add_basic_files()
 {
 	if [ ! -f "$JAIL_ROOT_DIR/etc/passwd" ]; then
 		echo "root:x:0:0:root:/root:/bin/bash" > $JAIL_ROOT_DIR/etc/passwd
+		chmod 0644 $JAIL_ROOT_DIR/etc/passwd
+		chown root:root $JAIL_ROOT_DIR/etc/passwd
 	fi
 
 	if [ ! -f "$JAIL_ROOT_DIR/etc/group" ]; then
 		echo "root:x:0:" > $JAIL_ROOT_DIR/etc/group
+		chmod 0644 $JAIL_ROOT_DIR/etc/group
+		chown root:root $JAIL_ROOT_DIR/etc/group
 	fi
 }
 
@@ -363,6 +366,7 @@ setup_basic_files()
 			echo "copy jail-cmd failed."
 			return 1
 		fi
+		clink $CMD_CONF $CMD_CONF
 	fi
 
 	cp_lib 
@@ -486,6 +490,11 @@ clean_jail()
 		return 1
 	fi
 
+	which fuser >/dev/null
+	if [ $? -ne 0 ]; then
+		printf "\033[31mneed fuser command to kill process, please install.\033[0m\n"
+		echo "clean may not success."
+	fi
 	fuser -k $JAIL_PATH >/dev/null
 
 	cat /proc/mounts | grep "/$JAIL_NAME[/| ]" | tac | awk '{print $2}' | uniq | xargs -i umount {} 

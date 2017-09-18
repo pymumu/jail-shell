@@ -65,8 +65,6 @@ dir /etc/security 0755 root:root
 clink /etc/ld.so.conf /etc/ld.so.conf
 clink /etc/security/limits.conf /etc/security/limits.conf
 clink /etc/nsswitch.conf /etc/nsswitch.conf
-clink /etc/passwd /etc/passwd
-clink /etc/group /etc/group
 clink /etc/inputrc /etc/inputrc
 clink /etc/localtime /etc/localtime
 file /usr/local/jail-shell/misc/rootfs/etc/profile /etc/profile 0755 root:root
