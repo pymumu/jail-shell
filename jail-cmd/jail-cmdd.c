@@ -10,6 +10,7 @@
 #define PID_FILE_PATH "/var/run/jail-cmdd.pid"
 #define COMMAND_ROOT_PATH "/var/local/jail-shell/command"
 #define MAX_GROUP_NUM  64
+#define JAIL_CMDD_CONF_FILE "/etc/jail-shell/cmdd_config"
 
 
 struct cmdd_context {
@@ -37,14 +38,16 @@ struct cmdd_context {
 
 struct cmdd_config {
 	int port;
-	int enable_log;
+	int audit;
+	int audit_args;
 };
 
 int pid_file_fd;
 
 struct cmdd_config config = {
 	.port = DEFAULT_PORT,
-	.enable_log = 1,
+	.audit = 0,
+	.audit_args = 0,
 };
 
 void help(void)
@@ -204,13 +207,13 @@ int get_command_user_group(char *jail_name, char *command, char *user, int user_
 		goto errout;
 	}
 
-
 	while (fgets(buff, MAX_LINE_LEN, fp)) {
 		filedNum = sscanf(buff, "%1024s %1024s %1024s", filed1, filed2, filed3);
 		if (filedNum < 0) {
 			continue;
 		}
 
+		/*  comment line */
 		if (filed1[0] == '#') {
 			continue;
 		}
@@ -219,10 +222,12 @@ int get_command_user_group(char *jail_name, char *command, char *user, int user_
 			continue;
 		}
 
+		/*  found command  */
 		if (strncmp(basename(command), filed1, MAX_LINE_LEN) != 0) {
 			continue;
 		}
 
+		/*  copy user and group */
 		strncpy(user, filed2, user_maxlen);
 		strncpy(group, filed3, group_maxlen);
 		break;
@@ -262,7 +267,9 @@ int change_uid_gid_by_command(struct jail_cmd_cmd *cmd_cmd, char *jail_name, cha
 	int gid = cmd_cmd->gid;
 
 	if (get_command_user_group(jail_name, command, username, sizeof(username), groupname, sizeof(groupname)) == 0) {
+		/*  if user or group is '-' then use uid and gid from jail-cmd */
 		if (strncmp(username, "-", sizeof(username)) == 0 || strncmp(groupname, "-", sizeof(groupname)) == 0) {
+			/*  if uid and gid is 0, return no permission */
 			if (uid == 0 || gid == 0) {
 				errno = EPERM;
 				return -1;
@@ -290,12 +297,14 @@ int change_uid_gid_by_command(struct jail_cmd_cmd *cmd_cmd, char *jail_name, cha
 				return -1;
 			}
 
+			/*  check if gid is in user's group list. */
 			for (i = 0; i < ngroups; i++) {
 				if (grp->gr_gid == groups[i]) {
 					break;
 				}
 			}
 
+			/*  if gid is not in user's group list, return invalid. */
 			if (i >= ngroups) {
 				errno = EINVAL;
 				return -1;
@@ -306,6 +315,7 @@ int change_uid_gid_by_command(struct jail_cmd_cmd *cmd_cmd, char *jail_name, cha
 		}
 	} 
 
+	/*  start change process uid, gid */
 	if (set_uid_gid(uid, gid) != 0) {
 		return -1;		
 	}
@@ -362,6 +372,42 @@ void run_process(struct jail_cmd_cmd *cmd_cmd, char *jail_name)
 
 errout:
 	fprintf(stderr, "-sh: %s: %s\n", argv[0], strerror(errno));
+}
+
+void audit_log(struct jail_cmd_cmd *cmd_cmd)
+{
+	if (config.audit == 0) {
+		return ;
+	}
+
+	openlog("jail-shell", LOG_PID, 0);
+
+	if (config.audit_args) {
+		int i = 0;
+		int len = 0;
+		char argvs[MAX_LINE_LEN];
+		char *argv = NULL;
+		int argvs_len = 0;
+
+		for (i = 0; i < cmd_cmd->argc; i++) {
+			argv = cmd_cmd->argvs + len;
+			len += strlen(cmd_cmd->argvs + len) + 1;
+			strncpy(argvs +  argvs_len, argv, sizeof(argvs) - argvs_len - 1);
+			argvs_len = len;
+			argvs[argvs_len - 1] = ' ';
+			if (argvs_len >= sizeof(argvs)) {
+				argvs_len = sizeof(argvs);
+				break;
+			}	
+		}
+
+		argvs[argvs_len - 1] = 0;
+		syslog(LOG_NOTICE, "UID:%d GID:%d CMD:%s", cmd_cmd->uid, cmd_cmd->gid, argvs);
+	} else {
+		syslog(LOG_NOTICE, "UID:%d GID:%d CMD:%s", cmd_cmd->uid, cmd_cmd->gid, cmd_cmd->argvs);
+	}
+	closelog();
+
 }
 
 int get_jail_name(struct jail_cmd_cmd *cmd_cmd, char *out, int out_max_len)
@@ -428,7 +474,7 @@ int get_jail_name(struct jail_cmd_cmd *cmd_cmd, char *out, int out_max_len)
 	}	
 
 	if (strlen(out) <= 0) {
-		fprintf(stderr, "jaiel name is invalid, %s", out);
+		fprintf(stderr, "jail name is invalid, %s", out);
 		goto errout;
 	}
 	
@@ -446,6 +492,8 @@ int start_process(struct jail_cmd_cmd *cmd_cmd, int *mirror, int *mirror_err)
 	int pid = -1;
 	char jail_name[MAX_LINE_LEN]={0};
 	
+	audit_log(cmd_cmd);
+
 	if (get_jail_name(cmd_cmd, jail_name, sizeof(jail_name)) != 0) {
 		return -1;
 	}
@@ -1117,6 +1165,28 @@ void signal_handler(int sig)
 	}
 }
 
+int load_cmdd_config(char *param, char *value)
+{
+	if (strncmp(param, CONF_PORT, sizeof(CONF_PORT)) == 0) {
+		int port = atoi(value);
+		if (port <= 0) {
+			fprintf(stderr, "port is invalid: %s\n", value);
+			return 1;
+		}
+		config.port = port;
+	} else if (strncmp(param, CONF_AUDIT, sizeof(CONF_AUDIT)) == 0) {
+		if (strncmp(value, CONF_TRUE, sizeof(CONF_TRUE)) == 0) {
+			config.audit = 1;
+		}
+	} else if (strncmp(param, CONF_AUDIT_ARGS, sizeof(CONF_AUDIT_ARGS)) == 0) {
+		if (strncmp(value, CONF_TRUE, sizeof(CONF_TRUE)) == 0) {
+			config.audit_args = 1;
+		}
+	}
+
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	int opt;
@@ -1144,6 +1214,13 @@ int main(int argc, char *argv[])
 	}
 
 	atexit(onexit);
+
+	if (access(JAIL_CMDD_CONF_FILE, R_OK) == 0) {
+		if (load_config(JAIL_CMDD_CONF_FILE, load_cmdd_config) != 0 ) {
+			fprintf(stderr, "load configuration failed.\n");
+			return 1;
+		}
+	}
 
 	/*  ignore SIGCHLD, child will be recycled automatically */
 	signal(SIGCHLD, SIG_IGN);

@@ -18,6 +18,7 @@
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
+#include <syslog.h>
 #include <pwd.h>
 #include <grp.h>
 #include <errno.h>
@@ -49,6 +50,13 @@
 #define JAIL_JSID_FILE "/var/local/jail-shell/jsid/jsid-%s"
 #define COMMAND_LIST_FILE "command.list"
 #define MAX_LINE_LEN    1024
+
+#define CONF_PORT        "port"
+#define CONF_AUDIT       "audit"
+#define CONF_AUDIT_ARGS  "audit-args"
+
+#define CONF_TRUE        "true"
+#define CONF_FALSE       "false"
 
 typedef enum CMD_MSG_TYPE {
 	CMD_MSG_CMD        = 1,
@@ -108,6 +116,10 @@ struct sock_data {
 extern void set_sock_opt(int sock);
 
 extern int normalize_path(char *path);
+
+typedef int (*config_callback)(char *param, char *value);
+
+extern int load_config(char *config_file, config_callback call_back);
 
 #endif
 

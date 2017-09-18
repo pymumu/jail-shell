@@ -144,7 +144,7 @@ install_files()
 		return 1
 	fi
 
-	install -v -t $JAIL_SHELL_CONF_DIR etc/jail-shell/cmd_config etc/jail-shell/cmdd_config -m 640
+	install -v -t $JAIL_SHELL_CONF_DIR etc/jail-shell/cmd_config etc/jail-shell/cmdd_config -m 644
 	if [ $? -ne 0 ]; then
 		return 1
 	fi
@@ -184,6 +184,7 @@ remove_pam_config()
 	sed -i '/pam_jail_shell.so/d' $PREFIX/etc/pam.d/common-session 2>/dev/null 
 	sed -i '/pam_jail_shell.so/d' $PREFIX/etc/pam.d/login 2>/dev/null
 	sed -i '/pam_jail_shell.so/d' $PREFIX/etc/pam.d/sshd 2>/dev/null
+	sed -i '/pam_jail_shell.so/d' $PREFIX/etc/pam.d/su 2>/dev/null
 }
 
 
@@ -204,6 +205,11 @@ add_pam_config()
 	fi
 
 	echo "session required		pam_jail_shell.so" >> $PREFIX/etc/pam.d/sshd 2>/dev/null
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+
+	echo "session required		pam_jail_shell.so" >> $PREFIX/etc/pam.d/su 2>/dev/null
 	if [ $? -ne 0 ]; then
 		return 1
 	fi

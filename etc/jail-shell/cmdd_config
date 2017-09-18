@@ -1,3 +1,9 @@
 
 # what port.
 port 21104
+
+# audit 
+audit true
+
+# audit args
+audit-args  false

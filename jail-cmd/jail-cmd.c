@@ -3,7 +3,9 @@
  */
 
 #include "jail-cmd.h"
+
 #define JAIL_CMD "jail-cmd"
+#define JAIL_CMD_CONF_FILE "/etc/jail-shell/cmd_config"
 
 int window_size_changed = 0;
 int is_term_mode_change = 0;
@@ -74,6 +76,7 @@ int cmd_init(struct cmd_context *context, int argc, char *argv[])
 	struct jail_cmd_cmd *cmd = NULL;
 	int arg_len = 0;
 	int i = 0;
+	char *jsidkey = NULL;
 
 	cmd_head->magic = MSG_MAGIC;
 	cmd_head->type = CMD_MSG_CMD;
@@ -83,7 +86,14 @@ int cmd_init(struct cmd_context *context, int argc, char *argv[])
 	cmd->uid = geteuid();
 	cmd->gid = getegid();
 	cmd->isatty = is_atty;
-	strncpy(cmd->jsid, getenv(JAIL_KEY), sizeof(cmd->jsid));
+
+	jsidkey = getenv(JAIL_KEY);
+	if (jsidkey) {
+		strncpy(cmd->jsid, getenv(JAIL_KEY), sizeof(cmd->jsid));
+	} else {
+		memset(cmd->jsid, 0, sizeof(cmd->jsid));
+	}
+
 	if (cmd->isatty) {
 		/*  send term name to server */
 		if (getenv("TERM") != NULL) {
@@ -489,6 +499,21 @@ void signal_handler(int sig)
 	_exit(1);
 }
 
+int load_cmd_config(char *param, char *value)
+{
+	if (strncmp(param, CONF_PORT, sizeof(CONF_PORT)) == 0) {
+		int port = atoi(value);
+		if (port <= 0) {
+			fprintf(stderr, "port is invalid: %s\n", value);
+			return 1;
+		}
+
+		config.port = port;
+	}
+
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	/*  if command is not executed from symbol link, the arg[1] is the command will being executed */
@@ -505,6 +530,14 @@ int main(int argc, char *argv[])
 	is_atty = (isatty(STDIN_FILENO) && isatty(STDOUT_FILENO)) ? 1 : 0;
 
 	atexit(onexit);
+
+	if (access(JAIL_CMD_CONF_FILE, R_OK) == 0) {
+		if (load_config(JAIL_CMD_CONF_FILE, load_cmd_config) != 0 ) {
+			fprintf(stderr, "load configuration failed.\n");
+			return 1;
+		}
+	}
+
 	signal(SIGWINCH, signal_handler);
 	signal(SIGTERM, signal_handler);
 	signal(SIGQUIT, signal_handler);

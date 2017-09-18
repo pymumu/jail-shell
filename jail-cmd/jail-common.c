@@ -72,3 +72,48 @@ int normalize_path(char *path)
 
 	return nextadd - begin;
 }
+
+int load_config(char *config_file, config_callback call_back)
+{
+	char buff[MAX_LINE_LEN];
+	char filed1[MAX_LINE_LEN];
+	char filed2[MAX_LINE_LEN];
+	int filedNum = 0;
+
+	FILE *fp = NULL;
+
+	fp = fopen(config_file, "r");
+	if (fp == NULL) {
+		fprintf(stderr, "open %s failed, %s\n", config_file, strerror(errno));
+		goto errout;
+	}
+
+	while (fgets(buff, MAX_LINE_LEN, fp)) {
+		filedNum = sscanf(buff, "%1024s %1024s", filed1, filed2);
+		if (filedNum < 0) {
+			continue;
+		}
+
+		/*  comment line */
+		if (filed1[0] == '#') {
+			continue;
+		}
+
+		if (filedNum != 2) {
+			continue;
+		}
+
+		if (call_back(filed1, filed2) != 0) {
+			goto errout;
+		}
+	}
+
+	fclose(fp);
+	return 0;
+errout:
+	if (fp) {
+		fclose(fp);
+	}
+	return -1;
+}
+
