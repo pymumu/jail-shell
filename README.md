@@ -190,7 +190,8 @@ bind a directory to jail
 - **cmd:**
   * DESC:  
 executes commands within the system which outside jail.
-  * COMMAND: `cmd SRC DEST RUN_AS_USER` 
+  * COMMAND:   
+`cmd SRC DEST RUN_AS_USER` 
   * RUN_AS_USER: User who executes system commands, -:- means user in jail  
   * EXAMPLE:  
            `cmd /usr/bin/passwd /usr/bin/passwd -:- `  
