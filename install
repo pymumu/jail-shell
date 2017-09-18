@@ -71,6 +71,12 @@ add_system_depdence_libs()
 	echo "clink $LIBNSS_DNS $LIBNSS_DNS" >> $SAMPLE_FILE
 }
 
+get_systemd_path()
+{
+	service="`systemctl | grep .service | head -n 1 | awk '{print $1}'`"
+	SERVICE_PATH="`systemctl show $service | grep FragmentPath | awk -F'=' '{print $2}'`"
+	dirname $SERVICE_PATH
+}
 
 install_files()
 {
@@ -123,7 +129,11 @@ install_files()
 	fi
 
 	if [ $ISSYSTEMD -eq 0 ]; then
-		install -v -m 0644 -t $PREFIX/lib/systemd/system lib/systemd/system/jail-shell.service 
+		SYSTEM_UNIT_PATH="`get_systemd_path`"
+		if [ -z "$SYSTEM_UNIT_PATH" ]; then
+			return 1
+		fi
+		install -v -m 0644 -t $PREFIX/$SYSTEM_UNIT_PATH lib/systemd/system/jail-shell.service 
 		if [ $? -ne 0 ]; then
 			return 1
 		fi
@@ -220,8 +230,14 @@ uninstall_jail_shell()
 	rm -fr $PREFIX/usr/sbin/jail-shell
 	rm -fr $SECURITY_DIR/pam_jail_shell.so
 	rm -fr $PREFIX/etc/security/jail-shell.conf
-	rm -fr $PREFIX/lib/systemd/system/jail-shell.service
 	rm -fr $PREFIX/etc/default/jail-shell
+
+	if [ $ISSYSTEMD -eq 0 ]; then
+		SYSTEM_UNIT_PATH="`get_systemd_path`"
+		if [ ! -z "$SYSTEM_UNIT_PATH" ]; then
+			rm -f $PREFIX/$SYSTEM_UNIT_PATH/jail-shell.service
+		fi
+	fi
 
 	if [ -z "$PREFIX" ]; then
 		clean_service
