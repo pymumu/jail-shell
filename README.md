@@ -98,7 +98,7 @@ Example
 The following is an example of adding  user `test`  to a jail named `test-jail`.  
 1. add user `test`，and set password
 ```shell
-sudo useradd test
+sudo useradd test -s /bin/bash
 sudo passwd test
 ```
 

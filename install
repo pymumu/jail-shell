@@ -53,9 +53,11 @@ clean_service()
 add_system_depdence_libs()
 {
 	SAMPLE_FILE=$1
-	LIBNSS_COMP="`ldconfig -p | grep "libnss_compat.so\." | awk -F"=>" '{print $2}'`"
-	LIBNSS_FILES="`ldconfig -p | grep "libnss_files.so\." | awk -F"=>" '{print $2}'`"
-	LIBNSS_DNS="`ldconfig -p | grep "libnss_dns.so\." | awk -F"=>" '{print $2}'`"
+	LIBC_PATH="`ldd /bin/sh | grep libc.so | awk '{print $3}'`"
+	LIB_PATH="`dirname $LIBC_PATH`"
+	LIBNSS_COMP="`ldconfig -p | grep "libnss_compat.so\." | grep $LIB_PATH | awk -F"=>" '{print $2}'`"
+	LIBNSS_FILES="`ldconfig -p | grep "libnss_files.so\." | grep $LIB_PATH | awk -F"=>" '{print $2}'`"
+	LIBNSS_DNS="`ldconfig -p | grep "libnss_dns.so\." | grep $LIB_PATH | awk -F"=>" '{print $2}'`"
 	LIBDIR="`dirname $LIBNSS_DNS`"
 
 	echo "" >> $SAMPLE_FILE
@@ -225,7 +227,7 @@ uninstall_jail_shell()
 		clean_service
 	fi	
 
-	echo "\033[31mjail home /var/local/jail-shell is not deleted, please check and delete manually.\033[0m"
+	printf "\033[31mjail home /var/local/jail-shell is not deleted, please check and delete manually.\033[0m\n"
 }
 
 

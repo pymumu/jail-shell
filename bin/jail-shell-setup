@@ -39,6 +39,7 @@ create_dir()
 		return 1
 	fi
 
+    CHMOD_DIR="$CREATE_DIR"
     CHECK_DIR="`dirname $CREATE_DIR`"
     while [ ! -d "$CHECK_DIR" ]
     do
@@ -225,7 +226,7 @@ clink()
 
 	if [ -h "$1" ]; then
 		LINKED_FILE="`readlink -e $1`"
-		ln -f -s $LINKED_FILE $JAIL_ROOT_DIR/$1
+		link_cp $1 $JAIL_ROOT_DIR/$1
 		if [ $? -ne 0 ]; then
 			return 1
 		fi
@@ -233,6 +234,14 @@ clink()
 		return $?
 	fi
 
+	TARGET_DIR="`dirname $JAIL_ROOT_DIR/$2`"
+	if [ ! -d "$TARGET_DIR" ]; then
+		create_dir $TARGET_DIR 0755 root:root
+		if [ $? -ne 0 ]; then 
+			echo "create directory $TARGET_DIR failed."
+			return 1
+		fi
+	fi
 	link_cp $1 $JAIL_ROOT_DIR/$2
 	if [ $? -ne 0 ]; then
 		return 1

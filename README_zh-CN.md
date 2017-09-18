@@ -95,7 +95,7 @@ sudo /usr/local/jail-shell/install -u
 如下以将test用户，添加到安全受限shell为例。  
 1. 添加test用户，并设置密码
 ```shell
-sudo useradd test
+sudo useradd test -s /bin/bash
 sudo passwd test
 ```
 

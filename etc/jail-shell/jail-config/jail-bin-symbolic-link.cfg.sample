@@ -107,7 +107,6 @@ clink /bin/date /bin/date
 clink /bin/kill /bin/kill
 clink /bin/tar /bin/tar
 clink /bin/gzip /bin/gzip
-clink /usr/bin/vi /usr/bin/vi
 clink /usr/bin/[ /usr/bin/[
 clink /usr/bin/tail /usr/bin/tail
 clink /usr/bin/less /usr/bin/less
@@ -120,7 +119,6 @@ clink /usr/bin/test /usr/bin/test
 clink /usr/bin/watch /usr/bin/watch
 clink /usr/bin/which /usr/bin/which
 clink /usr/bin/xargs /usr/bin/xargs
-clink /usr/bin/xxd /usr/bin/xxd
 clink /usr/bin/find /usr/bin/find
 
 # Base directory binding configuration
