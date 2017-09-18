@@ -12,7 +12,7 @@ if [ "${PS1-}" ]; then
 	if [ "${BASH-}" ]; then 
 		PS1="\[\033[01;32m\]\\h\[\033[00m\]:\[\033[01;34m\]\w \$\[\033[00m\] "
 	else
-		if ["`id -u`" -eq 0 ]; then
+		if [ "`id -u`" -eq 0 ]; then
 			PS1="# "
 		else
 			PS1="$ "
