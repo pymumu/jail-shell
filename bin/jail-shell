@@ -39,9 +39,19 @@ showhelp()
 
 is_user_exist()
 {
-	id -u $1 >/dev/null 2>&1
-	return $?
+	echo "$1" | grep "@" > /dev/null 2>&1
+	if [ $? -ne 0 ]; then
+		id -u $1 >/dev/null 2>&1
+		return $?
+	fi
 
+	GROUP="`echo $1 | sed 's/@//g'`"
+	getent group $GROUP >/dev/null 2>&1
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+
+	return 0
 }
 
 is_user_added()
@@ -126,7 +136,7 @@ user()
 	done
 
 	if [ "$act" = "LIST" ]; then
-		printf "%-24s %-24s %-24s\n" "[User]" "[Jail]" "[Namespace]"
+		printf "%-24s %-24s %-24s\n" "[User/Group]" "[Jail]" "[Namespace]"
 		while read USER JAIL NAMESPACE
 		do
 			case "$USER" in
@@ -143,14 +153,14 @@ user()
 	elif [ "$act" = "ADD" ]; then
 		is_user_exist $user
 		if [ $? -ne 0 ]; then
-			echo "user $user doesn't exists."
-			echo "please add user with 'useradd' to system first."
+			echo "user or group $user doesn't exists."
+			echo "please add user or group with 'useradd' or 'groupadd'  to system first."
 			return 1
 		fi
 
 		is_user_added $user
 		if [ $? -eq 0 ]; then
-			echo "user $user exists."
+			echo "user or group $user exists."
 			return 1
 		fi
 
