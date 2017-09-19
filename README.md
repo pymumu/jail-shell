@@ -183,9 +183,12 @@ bind a directory to jail
   * COMMAND:  
 `bind [SRC] DEST OPTION`  
   * OPTION: rw,ro,dev,nodev,exec,noexec, refer to (man mount) for the parameter description   
+%u in path '[SRC] DEST' will be replaced as user name  
   * EXAMPLE:  
 `bind / ro,nodev,nosuid`  
 `bind /opt/ /opt/ ro,nodev,noexec`  
+`bind /opt/upload /opt/upload rw,nodev,noexec,nosuid`  
+`bind /opt/%u /opt/upload ro,nodev,noexec,nosuid`  
 
 - **cmd:**
   * DESC:  

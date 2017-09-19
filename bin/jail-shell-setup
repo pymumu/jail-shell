@@ -24,13 +24,14 @@ showhelp()
 	echo "  --install [name | all]    install jail-shell from config file."
 	echo "  --remove [name]           remove a jail-shell."
 	echo "  --clean [name | all]      cleanup a jail-shell."
+	echo "  --user [name]             mount user, this paramter must before --mount."
 	echo "  --mount [name]            mount directory to a jail-shell."
 	echo "  -h, --help                show this help message."
 }
 
 create_dir()
 {
-    local CREATE_DIR="$1"
+	local CREATE_DIR="$1"
 	local MODE="$2"
 	local OWNER="$3"
 
@@ -38,20 +39,20 @@ create_dir()
 		return 1
 	fi
 
-    CHMOD_DIR="$CREATE_DIR"
-    CHECK_DIR="`dirname $CREATE_DIR`"
-    while [ ! -d "$CHECK_DIR" ]
-    do
-            CHMOD_DIR="$CHECK_DIR"
-            CHECK_DIR="`dirname $CHECK_DIR`"
-    done
+	CHMOD_DIR="$CREATE_DIR"
+	CHECK_DIR="`dirname $CREATE_DIR`"
+	while [ ! -d "$CHECK_DIR" ]
+	do
+		CHMOD_DIR="$CHECK_DIR"
+		CHECK_DIR="`dirname $CHECK_DIR`"
+	done
 
-    mkdir -p  $CREATE_DIR
+	mkdir -p  $CREATE_DIR
 	if [ $? -ne 0 ]; then
 		return 1
 	fi
-    chmod $MODE $CHMOD_DIR -R
-    chown $OWNER $CHMOD_DIR -R
+	chmod $MODE $CHMOD_DIR -R
+	chown $OWNER $CHMOD_DIR -R
 	if [ $? -ne 0 ]; then
 		return 1
 	fi
@@ -331,6 +332,13 @@ bind()
 		return 1
 	fi
 
+	if [ ! -z "$USER_NAME" ]; then
+		#if user name is not empty and %src %dest include %u, replace %u to user name
+		src="`echo $src | sed "s/%u/${USER_NAME}/g"`"
+		dest="`echo $dest | sed "s/%u/${USER_NAME}/g"`"
+	fi
+
+	echo "mount --bind $src $dest" >> /tmp/mount.log 
 	mount --bind $src $dest
 	if [ $? -ne 0 ]; then
 		return 1
@@ -604,6 +612,8 @@ mount_jail()
 {
 	local ret=0
 	JAIL_NAME="$1"	
+	USER_NAME="$2"
+
 	JAIL_CFG="$CONF_PATH/${JAIL_NAME}.cfg"
 	if [ ! -e $JAIL_CFG ]; then
 		echo "jail $JAIL_NAME doesn't exist."
@@ -641,7 +651,8 @@ list_jail()
 
 main()
 {
-	OPTS=`getopt -o h --long help,install:,remove:,clean:,mount:,list \
+	local USER=""
+	OPTS=`getopt -o h --long help,install:,remove:,clean:,user:,mount:,list \
 		-n  "" -- "$@"`
 
 	if [ $# -eq 0 ]; then
@@ -678,8 +689,11 @@ main()
 			clean_jails $2
 			return $?
 			shift 2;;
+		--user )
+			USER="$2"
+			shift 2;;
 		--mount )
-			mount_jail $2
+			mount_jail $2 $USER
 			return $?
 			shift 2;;
 		--list )

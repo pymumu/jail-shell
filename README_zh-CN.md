@@ -167,10 +167,13 @@ ssh test@127.0.0.1
   * 参数：  
 `bind [SRC] DEST OPTION`  
 OPTION: rw,ro,dev,nodev,exec,noexec  
+路径'[SRC] DEST'中的%u将会替换为用户名  
 查阅`man mount`获取参数说明   
   * 例子：  
 `bind / ro,nodev,nosuid`  
 `bind /opt/ /opt/ ro,nodev,noexec`  
+`bind /opt/upload /opt/upload rw,nodev,noexec,nosuid`  
+`bind /opt/%u /opt/upload ro,nodev,noexec,nosuid`  
 
 - **cmd: 执行系统内命令**  
   * 参数：  

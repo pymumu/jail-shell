@@ -409,12 +409,12 @@ errout:
 	return -1;
 }
 
-int mount_from_cfg(struct user_jail_struct *info)
+int mount_from_cfg(struct user_jail_struct *info, const char *user)
 {
 	char mount_cmd[PATH_MAX];
 	int ret;
 
-	snprintf(mount_cmd, PATH_MAX, "%s --mount %s", MOUNT_SCRIPT_PATH, info->jail);
+	snprintf(mount_cmd, PATH_MAX, "%s --user %s --mount %s", MOUNT_SCRIPT_PATH, user, info->jail);
 
 	ret = system(mount_cmd);
 	if (ret != 0) {
@@ -424,7 +424,7 @@ int mount_from_cfg(struct user_jail_struct *info)
 	return 0;
 }
 
-int do_mount(struct user_jail_struct *info, const char *root_path)
+int do_mount(struct user_jail_struct *info, const char *user, const char *root_path)
 {
 	char proc_path[PATH_MAX];
 	char pts_path[PATH_MAX];
@@ -445,7 +445,7 @@ int do_mount(struct user_jail_struct *info, const char *root_path)
 	mount("none", "/", NULL, MS_REC|MS_PRIVATE, NULL);
 	mount("none", "/proc", NULL, MS_REC|MS_PRIVATE, NULL);
 
-	if (mount_from_cfg(info) != 0) {
+	if (mount_from_cfg(info, user) != 0) {
 		return 1;
 	}
 
@@ -509,7 +509,7 @@ void jail_init(struct user_jail_struct *info, const char *user, char *pid_file, 
 	snprintf(proc_path, PATH_MAX, "%s/proc", chroot_path);
 
 	/*  remount proc directory */
-	if (do_mount(info, chroot_path) != 0) {
+	if (do_mount(info, user, chroot_path) != 0) {
 		goto out;
 	}
 
@@ -564,14 +564,14 @@ int create_jail_ns(struct user_jail_struct *info, const char *user, char *pid_fi
 
 #ifdef __NR_setns
 	if (info->namespace_flag == 0) {
-		return do_mount(info, chroot_path);
+		return do_mount(info, user, chroot_path);
 	}
 	if (unshare(info->namespace_flag) != 0) {
 		return 1;
 	}
 #else
 	/*  NOT support */
-	return do_mount(info, chroot_path);
+	return do_mount(info, user, chroot_path);
 #endif
 
 	pid = fork();
