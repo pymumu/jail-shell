@@ -23,7 +23,6 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <dirent.h> 
 #include <sys/syscall.h>
 
 #define  PAM_SM_SESSION
@@ -152,6 +151,24 @@ void pam_log(const char *format, ...)
 	va_end(args);
 }
 
+int drop_cap(void)
+{
+	int i;
+
+	for (i = 0; i < cap_drop_size; i++) {
+		if (cap_drop[i].isdrop == 0) {
+			continue;
+		}
+
+		if (prctl(PR_CAPBSET_DROP, cap_drop[i].cap, 0, 0) < 0) {
+			pam_log("Drop %s failed, errno %s\n", cap_drop[i].capname, strerror(errno));
+			continue;
+		}
+
+	}
+	return 0;
+}
+
 unsigned long get_rnd_number(void) 
 {
 	int rnd_fd = -1;
@@ -174,41 +191,6 @@ errout:
 		close(rnd_fd);
 	}
 	return -1;
-}
-
-int only_one_process(const char *proc_dir)
-{
-	DIR *dir;
-	struct dirent *dent;
-	int proc_num = 0;
-	char comm_file[PATH_MAX];
-	int is_one_process = 1;
-
-	dir = opendir(proc_dir);
-	if (dir == NULL) {
-		return -1;
-	}	
-
-	while((dent = readdir(dir)) != NULL) {
-		if (dent->d_type != DT_DIR) {
-			continue;
-		}
-
-		snprintf(comm_file, PATH_MAX, "%s/%s/comm", proc_dir, dent->d_name);
-		if (access(comm_file, F_OK) != 0) {
-			continue;
-		}
-		
-		proc_num++;
-		if (proc_num > 1) {
-			is_one_process = 0;
-			break;
-		}
-	}
-
-	closedir(dir);
-
-	return is_one_process;
 }
 
 int get_namespace_flag(char *namespace, int max_len) 
@@ -373,7 +355,7 @@ int do_chroot(const char *path)
 	return 0;
 }
 
-int try_lock_pid(const char *pid_file)
+int try_lock_pid(const char *pid_file, int no_close_exec)
 {
 	int fd;
 	int flags;
@@ -391,10 +373,12 @@ int try_lock_pid(const char *pid_file)
 		goto errout;
 	}
 
-	flags |= FD_CLOEXEC; 
-	if (fcntl(fd, F_SETFD, flags) == -1) {
-		fprintf(stderr, "Could not set flags for PID file %s", pid_file);
-		goto errout;
+	if (no_close_exec == 0) {
+		flags |= FD_CLOEXEC; 
+		if (fcntl(fd, F_SETFD, flags) == -1) {
+			fprintf(stderr, "Could not set flags for PID file %s", pid_file);
+			goto errout;
+		}
 	}
 
 	if (lockf(fd, F_TLOCK, 0) < 0) {
@@ -449,12 +433,7 @@ int do_mount(struct user_jail_struct *info, const char *user, const char *root_p
 		return 1;
 	}
 
-	/*
-	if (do_chroot(chroot_path) < 0) {
 
-		exit(0);
-	}
-	*/
 	if (mount("proc", proc_path, "proc", MS_RDONLY | MS_NOSUID|MS_NOEXEC|MS_NODEV, NULL) < 0) {
 		return 1;
 	}
@@ -466,47 +445,12 @@ int do_mount(struct user_jail_struct *info, const char *user, const char *root_p
 	return 0;
 }
 
-void set_process_name(const char *user)
+void jail_init(struct user_jail_struct *info, char *user, char *pid_file, char *chroot_path)
 {
-	char prog_name[TMP_BUFF_LEN_32];
-	int fd = 0;
-	int cmd_len = 0;
-	char buff[4096];
-	fd = open("/proc/self/cmdline", O_RDONLY);
-	if (fd < 0) {
-		return;
-	}
-
-	/*  get length of cmdline */
-	cmd_len = read(fd, buff, 4096);
-	if (cmd_len < 0) {
-		close(fd);
-		return;
-	}
-	close(fd);
-
-	/*  zero cmdline */
-	memset(program_invocation_name, 0, cmd_len);
-
-	/*  set comm to init */
-	snprintf(prog_name, TMP_BUFF_LEN_32, "init");
-	prctl(PR_SET_NAME, prog_name, NULL, NULL, NULL); 
-
-	/*  set cmdline to init [user] */
-	snprintf(program_invocation_name,  TMP_BUFF_LEN_32, "init [%s]", user);
-}
-
-void jail_init(struct user_jail_struct *info, const char *user, char *pid_file, const char *chroot_path)
-{
-	int wstat;
 	int i = 0;
 	int fd;
-	int sleep_cnt = 0;
-	int last_proccess = 0;
-	char proc_path[PATH_MAX];
-	int pid_wait;
-
-	snprintf(proc_path, PATH_MAX, "%s/proc", chroot_path);
+	char *argv[] = {"/usr/bin/init", "-u", user, "-l", 0, 0};
+	char str_fd[TMP_BUFF_LEN_32];
 
 	/*  remount proc directory */
 	if (do_mount(info, user, chroot_path) != 0) {
@@ -528,35 +472,28 @@ void jail_init(struct user_jail_struct *info, const char *user, char *pid_file, 
 		close(i);
 	}
 
-	set_process_name(user);
-
-	fd = try_lock_pid(pid_file);
+	fd = try_lock_pid(pid_file, 1);
 	if (fd < 0) {
 		goto out;
 	}
 
-
-	/*  wait until all process exit, except jail_init process. */
-	while ((pid_wait = waitpid(-1, &wstat, 0)) > 0 || last_proccess == 0) {
-		if (pid_wait > 0) {
-			continue;
-		}
-
-		sleep_cnt++;
-		sleep(1);
-
-		if (sleep_cnt % 30 == 0) {
-			sleep_cnt = 0;
-			last_proccess = only_one_process(proc_path);
-		}
+	if (do_chroot(chroot_path) < 0) {
+		goto out;
 	}
 
-	unlink(pid_file);
+	if (drop_cap() != 0) {
+		goto out;
+	}
+
+	snprintf(str_fd, TMP_BUFF_LEN_32, "%d", fd);
+	argv[4] = str_fd;
+
+	execv(argv[0], argv);
 out:
 	_exit(0);
 }
 
-int create_jail_ns(struct user_jail_struct *info, const char *user, char *pid_file, const char *chroot_path)
+int create_jail_ns(struct user_jail_struct *info, char *user, char *pid_file, char *chroot_path)
 {
 	int pid;
 	int fd = -1;
@@ -719,7 +656,7 @@ int set_jsid_env(pam_handle_t *pamh, struct user_jail_struct *info, const char *
 	snprintf(pid_file, MAX_LINE_LEN, NS_PID_FILE_PATH, user);
 	snprintf(jsid_file_path, PATH_MAX, JAIL_JSID_FILE, user);
 
-	fd = try_lock_pid(pid_file);
+	fd = try_lock_pid(pid_file, 0);
 	jsid_fd = open(jsid_file_path, O_RDONLY);
 	if (jsid_fd < 0) {
 		create_gid = 1;
@@ -804,7 +741,7 @@ out:
 int wait_proc_mounted(const char *root_path) 
 {
 	char proc_uname_path[PATH_MAX];
-	int count;
+	int count = 0;
 
 	snprintf(proc_uname_path, PATH_MAX, "%s/proc/uptime", root_path);
 
@@ -820,13 +757,13 @@ int wait_proc_mounted(const char *root_path)
 	return 0;
 }
 
-int unshare_pid(struct user_jail_struct *info, const char *user, const char *chroot_path) 
+int unshare_pid(struct user_jail_struct *info, char *user, char *chroot_path) 
 {
 	char pid_file[MAX_LINE_LEN];
 	int fd;
 
 	snprintf(pid_file, MAX_LINE_LEN, NS_PID_FILE_PATH, user);
-	fd = try_lock_pid(pid_file);
+	fd = try_lock_pid(pid_file, 0);
 	if ( fd > 0) {
 		close(fd);
 		if (create_jail_ns(info, user, pid_file, chroot_path) != 0) {
@@ -843,24 +780,6 @@ int unshare_pid(struct user_jail_struct *info, const char *user, const char *chr
 		return 1;
 	}
 
-	return 0;
-}
-
-int drop_cap(void)
-{
-	int i;
-
-	for (i = 0; i < cap_drop_size; i++) {
-		if (cap_drop[i].isdrop == 0) {
-			continue;
-		}
-
-		if (prctl(PR_CAPBSET_DROP, cap_drop[i].cap, 0, 0) < 0) {
-			pam_log("Drop %s failed, errno %s\n", cap_drop[i].capname, strerror(errno));
-			continue;
-		}
-
-	}
 	return 0;
 }
 
@@ -888,12 +807,14 @@ int start_jail(pam_handle_t *pamh, int flags, int argc, const char *argv[])
 {
 	struct user_jail_struct *info;
 	char jail_path[MAX_LINE_LEN];
+	char user[MAX_LINE_LEN];
+	const char *user_pam;
 
-	const char *user;
 
-	if (pam_get_user(pamh, &user, NULL) != PAM_SUCCESS) {
+	if (pam_get_user(pamh, &user_pam, NULL) != PAM_SUCCESS) {
 		return PAM_USER_UNKNOWN;
 	}
+	strncpy(user, user_pam, MAX_LINE_LEN);
 
 	if (load_config()) {
 		return PAM_SUCCESS;

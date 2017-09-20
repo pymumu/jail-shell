@@ -338,7 +338,7 @@ bind()
 		dest="`echo $dest | sed "s/%u/${USER_NAME}/g"`"
 	fi
 
-	if [ ! -d "$src" ] || [ ! -d "$dest" ]; then
+	if [ ! -e "$src" ] || [ ! -e "$dest" ]; then
 		echo "directory $src or $dest doesn't exist"
 		return 1
 	fi
@@ -379,6 +379,13 @@ setup_basic_files()
 			return 1
 		fi
 		clink $CMD_CONF $CMD_CONF
+	fi
+
+	# copy init to jail
+	clink $JAIL_SHELL_HOME/bin/jail-init /usr/bin/init
+	if [ $? -ne 0 ]; then
+		echo "copy jail-init failed."
+		return 1
 	fi
 
 	cp_lib 

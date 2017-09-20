@@ -6,7 +6,7 @@ JAIL_CMD=jail-cmd
 JAIL_CMDD=jail-cmdd
 JAIL_CMDD_LIB =  -lutil
 
-CFLAGS +=-g  -Werror -Wall -Wstrict-prototypes -fno-omit-frame-pointer -Wstrict-aliasing 
+CFLAGS +=-g -O2 -Werror -Wall -Wstrict-prototypes -fno-omit-frame-pointer -Wstrict-aliasing 
 CXXFLAGS +=-Wall -fno-omit-frame-pointer -Wstrict-aliasing
 
 .PHONY: all 
