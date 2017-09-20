@@ -338,7 +338,11 @@ bind()
 		dest="`echo $dest | sed "s/%u/${USER_NAME}/g"`"
 	fi
 
-	echo "mount --bind $src $dest" >> /tmp/mount.log 
+	if [ ! -d "$src" ] || [ ! -d "$dest" ]; then
+		echo "directory $src or $dest doesn't exist"
+		return 1
+	fi
+
 	mount --bind $src $dest
 	if [ $? -ne 0 ]; then
 		return 1
