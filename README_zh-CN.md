@@ -6,6 +6,8 @@ jail-shell安全受限shell是一个Linux环境下的安全工具，主要使用
 
 可用于webhost的ssh受限访问；企业管理员的权限分级管理；一体化产品的权限控制。 
 
+![Example](https://github.com/pymumu/backup/raw/master/image/example.gif)
+
 功能列表
 ==============
 - **易于使用**

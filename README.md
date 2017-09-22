@@ -4,9 +4,12 @@ Jail-Shell
 [中文REAMDME请看这里](README_zh-CN.md)
 
 Jail-shell is a linux security tool mainly using chroot, namespaces technologies, limiting users to perform specific commands, and access sepcific directories.  
+
 Users can login through SSH, SCP, SFTP, Telnet, terminals, etc. and restrict them to a secure operating enviroment.  
+
 Jail-shell can be used for webhost ssh access control, enterprise Administrator's privilege hierarchy management.  
 
+![Example](https://github.com/pymumu/backup/raw/master/image/example.gif)
 
 Features
 ==============
