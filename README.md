@@ -9,8 +9,6 @@ Users can login through SSH, SCP, SFTP, Telnet, terminals, etc. and restrict the
 
 Jail-shell can be used for webhost ssh access control, enterprise Administrator's privilege hierarchy management.  
 
-![Example](https://github.com/pymumu/backup/raw/master/image/example.gif)
-
 Features
 ==============
 - **Easy to use**
@@ -125,6 +123,7 @@ sudo jail-shell user -a test -j test-jail
 ```shell
 ssh test@127.0.0.1
 ```
+![Example](https://github.com/pymumu/backup/raw/master/image/example.gif)
 
 Jail Config file format description
 -------------
