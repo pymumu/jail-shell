@@ -414,10 +414,12 @@ int do_mount(struct user_jail_struct *info, const char *user, const char *root_p
 	char pts_path[PATH_MAX];
 	char check_file[PATH_MAX];
 	struct stat buf;
+	uid_t ruid;
+	uid_t euid;
+	uid_t suid;
 
 	snprintf(proc_path, PATH_MAX, "%s/proc", root_path);
 	snprintf(pts_path, PATH_MAX, "%s/dev/pts", root_path);
-
 	snprintf(check_file, PATH_MAX, "%s/ptmx", pts_path);
 	if (lstat(check_file, &buf) == 0) {
 		return 0;
@@ -426,23 +428,32 @@ int do_mount(struct user_jail_struct *info, const char *user, const char *root_p
 	mkdir(proc_path, 0555);
 	mkdir(pts_path, 0755);
 
+	if (getresuid(&ruid, &euid, &suid) != 0) {
+		return 1;	
+	}
+
+	setresuid(0, 0, 0);
 	mount("none", "/", NULL, MS_REC|MS_PRIVATE, NULL);
 	mount("none", "/proc", NULL, MS_REC|MS_PRIVATE, NULL);
 
 	if (mount_from_cfg(info, user) != 0) {
-		return 1;
+		goto errout;
 	}
 
-
 	if (mount("proc", proc_path, "proc", MS_RDONLY | MS_NOSUID|MS_NOEXEC|MS_NODEV, NULL) < 0) {
-		return 1;
+		goto errout;
 	}
 
 	if (mount("devpts", pts_path, "devpts",  MS_NOSUID|MS_NOEXEC, NULL) < 0) {
-		return 1;
+		goto errout;
 	}
 
+	setresuid(ruid, euid, suid);
+
 	return 0;
+errout:
+	setresuid(ruid, euid, suid);
+	return 1;
 }
 
 void jail_init(struct user_jail_struct *info, char *user, char *pid_file, char *chroot_path)
@@ -787,14 +798,24 @@ int run_jail_post_script(const char *user, struct user_jail_struct *info)
 {
 	int ret;
 	char post_cmd[PATH_MAX];
+	uid_t ruid;
+	uid_t euid;
+	uid_t suid;
 
 	if (access(LOGIN_POST_SCRIPT, X_OK) != 0) {
 		return 0;
 	}
 
+	if (getresuid(&ruid, &euid, &suid) != 0) {
+		return 1;	
+	}
+
+	setresuid(0, 0, 0);
+
 	/* LOGIN_POST_SCRIPT %user% %jail_root_path%*/
 	snprintf(post_cmd, PATH_MAX, "%s %s %s/%s", LOGIN_POST_SCRIPT, user, jail_home, info->jail);
 	ret = system(post_cmd);
+	setresuid(ruid, euid, suid);
 	if (ret != 0) {
 		return 1;
 	}
