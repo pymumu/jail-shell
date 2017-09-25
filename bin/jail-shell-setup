@@ -62,6 +62,7 @@ create_dir()
 
 get_root_dir()
 {
+	# get JAIL_HOME directory path from jail-shell.conf file.
 	JAIL_DIR="`grep "^ *JAIL_HOME " $JAIL_SHELL_CONF | awk '{print $2}' 2>/dev/null`"
 	
 	if [ -z "$JAIL_DIR" ]; then
@@ -373,6 +374,7 @@ add_basic_files()
 setup_basic_files()
 {
 	if [ $cp_cmd -eq 1 ]; then
+		# if jail-cmd is needed, copy it into jail
 		clink $JAIL_SHELL_HOME/jail-cmd/jail-cmd $JAIL_CMD 
 		if [ $? -ne 0 ]; then
 			echo "copy jail-cmd failed."
@@ -442,16 +444,19 @@ process_cfg()
 			continue
 			;;
 		bind )
+			# this is called by pam_jail_shell when user login 
 			if [ "$act" != "mount" ]; then
 				continue;
 			fi
 			;;
 		dir | file | hlink | slink | clink | node)
+			# this is called when install jail
 			if [ "$act" != "setup" ]; then
 				continue;
 			fi
 			;;
 		cmd)
+			# this is called when install jail
 			if [ "$act" != "setup" ]; then
 				continue;
 			fi
@@ -509,6 +514,7 @@ clean_jail()
 		return 1
 	fi
 
+	# kill all process in jail, and umount directories.
 	which fuser >/dev/null
 	if [ $? -ne 0 ]; then
 		printf "\033[31mneed fuser command to kill process, please install.\033[0m\n"

@@ -160,6 +160,7 @@ install_files()
 	fi
 
 	add_system_depdence_libs $JAIL_SHELL_CONF_DIR/jail-config/jail.cfg.sample
+	add_system_depdence_libs $JAIL_SHELL_CONF_DIR/jail-config/jail-bin-symbolic-link.cfg.sample
 
 	cp misc/* $JAIL_SHELL_HOME_DIR/misc/ -avf
 	if [ $? -ne 0 ]; then
