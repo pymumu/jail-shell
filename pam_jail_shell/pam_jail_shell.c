@@ -136,7 +136,7 @@ char *const namespace_opt[] = {
 	[FLAG_NEWNET]  = "net",
 	[FLAG_NEWNS]   = "mnt",
 	[FLAG_NEWPID]  = "pid",
-	[FLAG_NEWUSER] = "user",
+	/* [FLAG_NEWUSER] = "user", */
 	[FLAG_NEWUTS]  = "uts",
 	[FLAG_NONE]    = "none",
 	NULL
@@ -667,10 +667,13 @@ int enter_jail_ns(struct user_jail_struct *info, const char *user, char *pid_fil
 	}
 
 	/*  enter user namespace */
+	/* TODO
+	 * currently return EINVAL
 	if (enter_ns(ns_pid, "user", CLONE_NEWUSER) != 0) {
 		ret = 1;
 		goto out;
 	}
+	*/ 
 
 	/*  enter uts namespace */
 	if (enter_ns(ns_pid, "uts", CLONE_NEWUTS) != 0) {
@@ -919,7 +922,7 @@ int start_jail(pam_handle_t *pamh, int flags, int argc, const char *argv[])
 	}
 
 	snprintf(jail_path, MAX_LINE_LEN, "%s/%s", jail_home, info->jail);
-	if (unshare_pid(info, user, jail_path) < 0) {
+	if (unshare_pid(info, user, jail_path) != 0) {
 		return PAM_SERVICE_ERR;
 	}
 
