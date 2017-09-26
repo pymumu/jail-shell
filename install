@@ -111,8 +111,8 @@ install_files()
 		return 1
 	fi
 
-	if [ ! -f "$PREFIX/$JAIL_SHELL_CONF_DIR/jail-shell.conf" ]; then
-		install -v -m 0600 -t  $PREFIX/$JAIL_SHELL_CONF_DIR pam_jail_shell/jail-shell.conf 
+	if [ ! -f "$PREFIX$JAIL_SHELL_CONF_DIR/jail-shell.conf" ]; then
+		install -v -m 0600 -t  $PREFIX$JAIL_SHELL_CONF_DIR pam_jail_shell/jail-shell.conf 
 		if [ $? -ne 0 ]; then
 			return 1
 		fi
@@ -133,7 +133,7 @@ install_files()
 		if [ -z "$SYSTEM_UNIT_PATH" ]; then
 			return 1
 		fi
-		install -v -m 0644 -t $PREFIX/$SYSTEM_UNIT_PATH lib/systemd/system/jail-shell.service 
+		install -v -m 0644 -t $PREFIX$SYSTEM_UNIT_PATH lib/systemd/system/jail-shell.service 
 		if [ $? -ne 0 ]; then
 			return 1
 		fi

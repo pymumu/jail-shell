@@ -185,7 +185,7 @@ int set_uid_gid(int uid, int gid)
 
 	return 0;
 errout:
-	return 1;
+	return -1;
 
 }
 
@@ -251,7 +251,7 @@ int injection_check(int argc, char *argv[])
 	for (i = 0; i < argc; i++) {
 		for (j = 0; j < char_count; j++) {
 			if (strstr(argv[i], inject_char[j])) {
-				return 1;
+				return -1;
 			}
 		}
 	}
@@ -341,7 +341,7 @@ void run_process(struct jail_cmd_cmd *cmd_cmd, char *jail_name)
 	argv[i] = 0;
 
 	/*  check shell inject characters */
-	if (injection_check(argc, argv)) {
+	if (injection_check(argc, argv) != 0) {
 		errno = EINVAL;
 		goto errout;
 	}
@@ -431,7 +431,7 @@ int get_jail_name(struct jail_cmd_cmd *cmd_cmd, char *out, int out_max_len)
 		goto errout;
 	}
 
-	/*  read GSID */
+	/*  read JSID */
 	if (fgets(buff, sizeof(buff) - 1, fp) == NULL) {
 		fprintf(stderr, "read gsid failed, %s\n", strerror(errno));
 		goto errout;
@@ -441,7 +441,7 @@ int get_jail_name(struct jail_cmd_cmd *cmd_cmd, char *out, int out_max_len)
 		buff[len - 1] = '\0';
 	}	
 
-	/*  check GSID */
+	/*  check JSID */
 	if (strncmp(buff, cmd_cmd->jsid, TMP_BUFF_LEN_32) != 0) {
 		fprintf(stderr, "gsid not match, %s:%s\n", buff, cmd_cmd->jsid);
 		goto errout;
@@ -532,12 +532,12 @@ int check_args(struct cmdd_context *context, struct jail_cmd_head *cmd_head, str
 
 	if (argc > MAX_ARGS_COUNT) {
 		fprintf(stderr, "too many args\n");
-		return 1;
+		return -1;
 	}
 
 	if (cmd_head->data_len > sizeof(context->recv_data.data) - sizeof(*cmd_head)) {
 		fprintf(stderr, "cmd length is invalid.\n");
-		return 1;
+		return -1;
 	}
 
 	/*  check arg number is valid. */
@@ -550,7 +550,7 @@ int check_args(struct cmdd_context *context, struct jail_cmd_head *cmd_head, str
 
 	if (argc != arg_count) {
 		fprintf(stderr, "arg number is invalid.\n");
-		return 1;
+		return -1;
 	}
 
 	return 0;
@@ -563,7 +563,7 @@ CMD_RETURN process_cmd(struct cmdd_context *context, struct jail_cmd_head *cmd_h
 		/*  init cmd message */
 		struct jail_cmd_cmd *cmd_cmd = (struct jail_cmd_cmd *)cmd_head->data;
 
-		if (check_args(context, cmd_head, cmd_cmd)) {
+		if (check_args(context, cmd_head, cmd_cmd) != 0) {
 			FD_CLR(context->sock, &context->rfds);
 			return CMD_RETURN_ERR;
 		}
@@ -1073,7 +1073,7 @@ int run_server(int port)
 	server = socket(PF_INET, SOCK_STREAM, 0);
 	if (server < 0) {
 		fprintf(stderr, "create socket failed, %s\n", strerror(errno));
-		return 1;
+		return -1;
 	}
 
 	if (setsockopt(server, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) != 0) {
@@ -1143,7 +1143,7 @@ errout:
 	if (server > 0) {
 		close(server);
 	}
-	return 1;
+	return -1;
 }
 
 void onexit(void) 
@@ -1171,7 +1171,7 @@ int load_cmdd_config(char *param, char *value)
 		int port = atoi(value);
 		if (port <= 0) {
 			fprintf(stderr, "port is invalid: %s\n", value);
-			return 1;
+			return -1;
 		}
 		config.port = port;
 	} else if (strncmp(param, CONF_AUDIT, sizeof(CONF_AUDIT)) == 0) {
@@ -1230,5 +1230,9 @@ int main(int argc, char *argv[])
 	signal(SIGQUIT, signal_handler);
 	signal(SIGABRT, signal_handler);
 
-	return run_server(config.port);
+	if (run_server(config.port) != 0) {
+		return 1;
+	}
+
+	return 0;
 }

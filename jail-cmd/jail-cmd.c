@@ -105,7 +105,7 @@ int cmd_init(struct cmd_context *context, int argc, char *argv[])
 		/*  send term win size to server */
 		if (ioctl(STDIN_FILENO, TIOCGWINSZ, &cmd->ws) != 0) {
 			fprintf(stderr, "get console win size failed, %s\r\n", strerror(errno));
-			return 1;
+			return -1;
 		}
 	}
 	
@@ -116,7 +116,7 @@ int cmd_init(struct cmd_context *context, int argc, char *argv[])
 	cmd->argc = argc;
 	if (argc > MAX_ARGS_COUNT) {
 		fprintf(stderr, "too many args list.\r\n");
-		return 1;
+		return -1;
 	}
 
 	for (i = 0; i < argc; i++) {
@@ -330,7 +330,7 @@ int set_win_size(struct cmd_context *context)
 	cmd_head->type = CMD_MSG_WINSIZE;
 	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &cmd_winsize->ws) != 0) {
 		fprintf(stderr, "get console win size failed, %s\r\n", strerror(errno));
-		return 1;
+		return -1;
 	}	
 
 	cmd_head->data_len = sizeof(*cmd_winsize);
@@ -414,7 +414,7 @@ out:
 	return context->prog_exit;
 
 errout:
-	return 1;
+	return -1;
 }
 
 int run_cmd(int argc, char * argv[], int port)
@@ -505,7 +505,7 @@ int load_cmd_config(char *param, char *value)
 		int port = atoi(value);
 		if (port <= 0) {
 			fprintf(stderr, "port is invalid: %s\n", value);
-			return 1;
+			return -1;
 		}
 
 		config.port = port;

@@ -35,13 +35,13 @@
 #define PAM_EXTERN
 #endif
 
-#define JAIL_CONF_PATH "/etc/jail-shell/jail-shell.conf"
-#define NS_PID_FILE_PATH "/var/run/jail-shell-ns-%s.pid"
-#define JAIL_VAR_DIR "/var/local/jail-shell"
-#define JAIL_VAR_JSID_DIR "/var/local/jail-shell/jsid"
-#define JAIL_JSID_FILE "/var/local/jail-shell/jsid/jsid-%s"
-#define MOUNT_SCRIPT_PATH "/usr/local/jail-shell/bin/jail-shell-setup"
-#define LOGIN_POST_SCRIPT "/usr/local/jail-shell/bin/jail-shell-post"
+#define JAIL_CONF_PATH     "/etc/jail-shell/jail-shell.conf"
+#define NS_PID_FILE_PATH   "/var/run/jail-shell-ns-%s.pid"
+#define JAIL_VAR_DIR       "/var/local/jail-shell"
+#define JAIL_VAR_JSID_DIR  "/var/local/jail-shell/jsid"
+#define JAIL_JSID_FILE     "/var/local/jail-shell/jsid/jsid-%s"
+#define MOUNT_SCRIPT_PATH  "/usr/local/jail-shell/bin/jail-shell-setup"
+#define LOGIN_POST_SCRIPT  "/usr/local/jail-shell/bin/jail-shell-post"
 
 #define TMP_BUFF_LEN_32   32
 #define MAX_LINE_LEN      4096
@@ -67,6 +67,8 @@ struct cap_drop_struct {
 	unsigned int cap;
 	int isdrop;
 };
+
+int setns(int fd, int nstype) __attribute__((weak));
 
 /*  for cap details, please read (man capabilities) */
 struct cap_drop_struct cap_drop[] = 
@@ -250,7 +252,7 @@ int load_config(void)
 
 	fp = fopen(JAIL_CONF_PATH, "r");
 	if (fp == NULL) {
-		return 1;
+		return -1;
 	}
 
 	while (fgets(line, MAX_LINE_LEN, fp)) {
@@ -398,11 +400,12 @@ int mount_from_cfg(struct user_jail_struct *info, const char *user)
 	char mount_cmd[PATH_MAX];
 	int ret;
 
+	/*  do bind directory for user */
 	snprintf(mount_cmd, PATH_MAX, "%s --user %s --mount %s", MOUNT_SCRIPT_PATH, user, info->jail);
 
 	ret = system(mount_cmd);
 	if (ret != 0) {
-		return 1;
+		return -1;
 	}
 
 	return 0;
@@ -421,6 +424,7 @@ int do_mount(struct user_jail_struct *info, const char *user, const char *root_p
 	snprintf(proc_path, PATH_MAX, "%s/proc", root_path);
 	snprintf(pts_path, PATH_MAX, "%s/dev/pts", root_path);
 	snprintf(check_file, PATH_MAX, "%s/ptmx", pts_path);
+	/*  if jail is ready mounted, return */
 	if (lstat(check_file, &buf) == 0) {
 		return 0;
 	}
@@ -440,6 +444,7 @@ int do_mount(struct user_jail_struct *info, const char *user, const char *root_p
 		goto errout;
 	}
 
+	/*  mount proc for jail */
 	if (mount("proc", proc_path, "proc", MS_RDONLY | MS_NOSUID|MS_NOEXEC|MS_NODEV, NULL) < 0) {
 		goto errout;
 	}
@@ -468,6 +473,7 @@ void jail_init(struct user_jail_struct *info, char *user, char *pid_file, char *
 		goto out;
 	}
 
+	/* start a init process for new namespace */
 	fd = open("/dev/null", O_RDWR);
 	close(0);
 	close(1);
@@ -483,6 +489,7 @@ void jail_init(struct user_jail_struct *info, char *user, char *pid_file, char *
 		close(i);
 	}
 
+	/*  create pid file and lock */
 	fd = try_lock_pid(pid_file, 1);
 	if (fd < 0) {
 		goto out;
@@ -510,22 +517,23 @@ int create_jail_ns(struct user_jail_struct *info, char *user, char *pid_file, ch
 	int fd = -1;
 	char buff[TMP_BUFF_LEN_32];
 
-#ifdef __NR_setns
-	if (info->namespace_flag == 0) {
+	if (setns) {
+		if (info->namespace_flag == 0) {
+			return do_mount(info, user, chroot_path);
+		}
+		if (unshare(info->namespace_flag) != 0) {
+			return -1;
+		}
+	} else {
+		/*  NOT support */
 		return do_mount(info, user, chroot_path);
 	}
-	if (unshare(info->namespace_flag) != 0) {
-		return 1;
-	}
-#else
-	/*  NOT support */
-	return do_mount(info, user, chroot_path);
-#endif
 
 	pid = fork();
 	if (pid < 0) {
-		return 1;
+		return -1;
 	} else if (pid == 0) {
+		/*  start user's init process */
 		jail_init(info, user, pid_file, chroot_path);
 	}
 
@@ -536,6 +544,7 @@ int create_jail_ns(struct user_jail_struct *info, char *user, char *pid_file, ch
 
 	ftruncate(fd, 0);
 
+	/*  write init pid to pid file */
 	snprintf(buff, TMP_BUFF_LEN_32, "%d\n", pid);
 	if (write(fd, buff, strnlen(buff, TMP_BUFF_LEN_32)) < 0) {
 		goto errout;
@@ -545,9 +554,15 @@ int create_jail_ns(struct user_jail_struct *info, char *user, char *pid_file, ch
 	return 0;
 
 errout:
-	kill(pid, SIGKILL);
-	close(fd);
-	return 1;
+	if (pid > 0) {
+		/*  kill namespace init process */
+		kill(pid, SIGKILL);
+	}
+
+	if (fd > 0) {
+		close(fd);
+	}
+	return -1;
 }
 
 int enter_ns(int pid, char *ns_name, int flag) 
@@ -559,19 +574,19 @@ int enter_ns(int pid, char *ns_name, int flag)
 
 	fd = open(ns_file, O_RDONLY);
 	if (fd < 0) {
-		return 1;
+		return -1;
 	}
 
 	if (setns(fd, flag) != 0) {
 		close(fd);
-		return 1;
+		return -1;
 	}
 
 	close(fd);
 
 	return 0;
 #else
-	return 1;
+	return -1;
 #endif
 }
 
@@ -582,12 +597,13 @@ int enter_jail_ns(struct user_jail_struct *info, const char *user, char *pid_fil
 	int ret = 1;
 	int ns_pid = 0;
 
+	/*  read pid from pid file */
 	fd = open(pid_file, O_RDONLY);
 	if (fd < 0) {
 		if (errno == ENOENT) {
 			return 0;
 		}
-		return 1;
+		return -1;
 	}
 
 	/*  read jail init process pid */
@@ -608,31 +624,37 @@ int enter_jail_ns(struct user_jail_struct *info, const char *user, char *pid_fil
 		goto out;
 	}
 #ifdef __NR_setns
+	/*  enter ipc namespace */
 	if (enter_ns(ns_pid, "ipc", CLONE_NEWIPC) != 0) {
 		ret = 1;
 		goto out;
 	}
 
+	/*  enter net namespace */
 	if (enter_ns(ns_pid, "net", CLONE_NEWNET) != 0) {
 		ret = 1;
 		goto out;
 	}
 
+	/*  enter mnt namespace */
 	if (enter_ns(ns_pid, "mnt", CLONE_NEWNS) != 0) {
 		ret = 1;
 		goto out;
 	}
 
+	/*  enter pid namespace */
 	if (enter_ns(ns_pid, "pid", CLONE_NEWPID) != 0) {
 		ret = 1;
 		goto out;
 	}
 
+	/*  enter user namespace */
 	if (enter_ns(ns_pid, "user", CLONE_NEWUSER) != 0) {
 		ret = 1;
 		goto out;
 	}
 
+	/*  enter uts namespace */
 	if (enter_ns(ns_pid, "uts", CLONE_NEWUTS) != 0) {
 		ret = 1;
 		goto out;
@@ -640,7 +662,7 @@ int enter_jail_ns(struct user_jail_struct *info, const char *user, char *pid_fil
 
 	ret = 0;
 #else
-	ret = 1;
+	ret = -1;
 #endif
 out:
 	if (fd > 0) {
@@ -658,7 +680,7 @@ int set_jsid_env(pam_handle_t *pamh, struct user_jail_struct *info, const char *
 	char pid_file[MAX_LINE_LEN];
 	int fd = -1;
 	int jsid_fd = -1;
-	int create_gid = 0;
+	int create_jid = 0;
 	int ret;
 
 	mkdir(JAIL_VAR_DIR, 0755);
@@ -670,47 +692,54 @@ int set_jsid_env(pam_handle_t *pamh, struct user_jail_struct *info, const char *
 	fd = try_lock_pid(pid_file, 0);
 	jsid_fd = open(jsid_file_path, O_RDONLY);
 	if (jsid_fd < 0) {
-		create_gid = 1;
+		/*  if jsid file doesn't exist, just create jsid file. */
+		create_jid = 1;
 	} else {
 		if (fd > 0 && lseek(fd, 0, SEEK_END) > 0) {
-			create_gid = 1;
+			/*  if jsid file exists, and init process is not running, create a new JSID */
+			create_jid = 1;
 			close(jsid_fd);
 			jsid_fd = -1;
 		} else {
-			create_gid = 0;
+			/*  if jsid file exist, and pid file is empty, just read JSID in jsid file 
+			 *  or user's init process is running, just read JSID in jsid file*/
+			create_jid = 0;
 		}
 	}
 
-	if (create_gid) {
+	if (create_jid) {
 		jsid_fd = open(jsid_file_path, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
 		if (jsid_fd < 0) {
-			ret = 1;
+			ret = -1;
 			goto out;
 		}
 
 		rnd_num = get_rnd_number();
 		if (rnd_num == -1) {
-			ret = 1;
+			ret = -1;
 			goto out;
 		}
 
 		ftruncate(jsid_fd, 0);
 
+		/*  write JSID number */
 		snprintf(buff, MAX_LINE_LEN, "%lu\n", rnd_num);
 		if (write(jsid_fd, buff, strnlen(buff, MAX_LINE_LEN)) < 0) {
-			ret = 1;
+			ret = -1;
 			goto out;
 		}
 
+		/*  write user name */
 		snprintf(buff, MAX_LINE_LEN, "%s\n", user);
 		if (write(jsid_fd, buff, strnlen(buff, MAX_LINE_LEN)) < 0) {
-			ret = 1;
+			ret = -1;
 			goto out;
 		}
 
+		/*  write jail name */
 		snprintf(buff, MAX_LINE_LEN, "%s\n", info->jail);
 		if (write(jsid_fd, buff, strnlen(buff, MAX_LINE_LEN)) < 0) {
-			ret = 1;
+			ret = -1;
 			goto out;
 		}
 
@@ -719,7 +748,7 @@ int set_jsid_env(pam_handle_t *pamh, struct user_jail_struct *info, const char *
 		char *line_end;
 		int len = read(jsid_fd, buff, MAX_LINE_LEN - 1);
 		if ( len < 0) {
-			ret = 1;
+			ret = -1;
 			goto out;
 		}
 		buff[len] = 0;
@@ -732,6 +761,7 @@ int set_jsid_env(pam_handle_t *pamh, struct user_jail_struct *info, const char *
 		snprintf(jsid_env, TMP_BUFF_LEN_32, "%s=%s", JAIL_KEY, buff);
 	}
 
+	/*  set JSID enviroment to shell */
 	if (pam_putenv(pamh, jsid_env) != PAM_SUCCESS) {
 		return PAM_SERVICE_ERR;
 	}
@@ -756,12 +786,13 @@ int wait_proc_mounted(const char *root_path)
 
 	snprintf(proc_uname_path, PATH_MAX, "%s/proc/uptime", root_path);
 
+	/* wait for directory mount */
 	while (access(proc_uname_path, F_OK) < 0) {
 		usleep(100000);
 		count++;
 		/* wait for 5 seconds */
 		if (count > 10 * 5) {
-			return 1;
+			return -1;
 		}
 	}
 
@@ -777,18 +808,25 @@ int unshare_pid(struct user_jail_struct *info, char *user, char *chroot_path)
 	fd = try_lock_pid(pid_file, 0);
 	if ( fd > 0) {
 		close(fd);
+		/*  if no user's namespace init process running 
+		 *  create new namepace, and start a init process for user.
+		 */
 		if (create_jail_ns(info, user, pid_file, chroot_path) != 0) {
-			return 1;
+			return -1;
 		}
 	} else {
+		/*
+		 * if user's namepsace init process running
+		 * just enter the namepsace of init process  
+		 */
 		if (enter_jail_ns(info, user, pid_file, chroot_path) != 0) {
-			return 1;
+			return -1;
 		}
 	}
 
 	/*  from mount success */
 	if (wait_proc_mounted(chroot_path) != 0) {
-		return 1;
+		return -1;
 	}
 
 	return 0;
@@ -817,7 +855,7 @@ int run_jail_post_script(const char *user, struct user_jail_struct *info)
 	ret = system(post_cmd);
 	setresuid(ruid, euid, suid);
 	if (ret != 0) {
-		return 1;
+		return -1;
 	}
 
 	return 0;
@@ -831,25 +869,33 @@ int start_jail(pam_handle_t *pamh, int flags, int argc, const char *argv[])
 	char user[MAX_LINE_LEN];
 	const char *user_pam;
 
-
+	/*  get username from pam */
 	if (pam_get_user(pamh, &user_pam, NULL) != PAM_SUCCESS) {
 		return PAM_USER_UNKNOWN;
 	}
 	strncpy(user, user_pam, MAX_LINE_LEN);
 
+	/*  load configuration from jail-shell.conf */
 	if (load_config()) {
 		return PAM_SUCCESS;
 	}
 
+	/* get jail info from user name */
 	info = get_user_jail(pamh);
 	if (info == NULL) {
 		return PAM_SUCCESS;
 	}
 
+	/*  set JSID enviroment with a random number 
+	 *  if JSID exists, read from existrs and set.
+	 */
 	if (set_jsid_env(pamh, info, user) != 0) {
 		return PAM_SERVICE_ERR;
 	}
 
+	/*
+	 * run jail-shell-post script, in order to add user entry in /etc/passwd
+	 */
 	if (run_jail_post_script(user, info) != 0) {
 		return PAM_SERVICE_ERR;
 	}
@@ -859,10 +905,12 @@ int start_jail(pam_handle_t *pamh, int flags, int argc, const char *argv[])
 		return PAM_SERVICE_ERR;
 	}
 
+	/*  chroot to jail directory */
 	if (do_chroot(jail_path) < 0) {
 		return PAM_SERVICE_ERR;
 	}
 
+	/*  Drop all unnesseary cap */
 	if (drop_cap() != 0) {
 		return PAM_SERVICE_ERR;
 	}
