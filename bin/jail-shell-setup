@@ -360,12 +360,20 @@ add_basic_files()
 {
 	if [ ! -f "$JAIL_ROOT_DIR/etc/passwd" ]; then
 		echo "root:x:0:0:root:/root:/bin/bash" > $JAIL_ROOT_DIR/etc/passwd
+		# TODO
+		# for selinux
+		chcon --type etc_t $JAIL_ROOT_DIR/etc/passwd >/dev/null 2>&1
+
 		chmod 0644 $JAIL_ROOT_DIR/etc/passwd
 		chown root:root $JAIL_ROOT_DIR/etc/passwd
 	fi
 
 	if [ ! -f "$JAIL_ROOT_DIR/etc/group" ]; then
 		echo "root:x:0:" > $JAIL_ROOT_DIR/etc/group
+		# TODO
+		# for selinux
+		chcon --type etc_t $JAIL_ROOT_DIR/etc/group >/dev/null 2>&1
+
 		chmod 0644 $JAIL_ROOT_DIR/etc/group
 		chown root:root $JAIL_ROOT_DIR/etc/group
 	fi

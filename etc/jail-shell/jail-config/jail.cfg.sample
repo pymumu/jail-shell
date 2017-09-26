@@ -78,6 +78,9 @@ clink /dev/zero /dev/zero
 clink /dev/ptmx /dev/ptmx
 clink /dev/urandom /dev/urandom
 clink /dev/tty /dev/tty
+clink /dev/tty1 /dev/tty1
+clink /dev/tty2 /dev/tty2
+clink /dev/tty3 /dev/tty3
 slink /proc/self/fd/2 /dev/stderr
 slink /proc/self/fd/0 /dev/stdin
 slink /proc/self/fd/1 /dev/stdout
