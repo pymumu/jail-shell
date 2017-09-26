@@ -416,6 +416,7 @@ int do_mount(struct user_jail_struct *info, const char *user, const char *root_p
 	char proc_path[PATH_MAX];
 	char pts_path[PATH_MAX];
 	char check_file[PATH_MAX];
+	char mount_cmd[PATH_MAX];
 	struct stat buf;
 	uid_t ruid;
 	uid_t euid;
@@ -437,13 +438,30 @@ int do_mount(struct user_jail_struct *info, const char *user, const char *root_p
 	}
 
 	setresuid(0, 0, 0);
+#if 0
 	mount("none", "/", NULL, MS_REC|MS_PRIVATE, NULL);
 	mount("none", "/proc", NULL, MS_REC|MS_PRIVATE, NULL);
+#endif
+
+	/*  For selinux call shell command to mount directory */
+	/*  mount API may fail, when selinux is enabled. */
+	system("mount --make-rprivate /");
+	system("mount --make-rprivate /proc");
 
 	if (mount_from_cfg(info, user) != 0) {
 		goto errout;
 	}
 
+	snprintf(mount_cmd, PATH_MAX, "mount -t proc proc %s -o nosuid,noexec,nodev", proc_path);
+	if (system(mount_cmd) != 0) {
+		goto errout;
+	}
+
+	snprintf(mount_cmd, PATH_MAX, "mount -t devpts devpts %s -o nosuid,noexec", pts_path);
+	if (system(mount_cmd) != 0) {
+		goto errout;
+	}
+#if 0
 	/*  mount proc for jail */
 	if (mount("proc", proc_path, "proc", MS_RDONLY | MS_NOSUID|MS_NOEXEC|MS_NODEV, NULL) < 0) {
 		goto errout;
@@ -452,7 +470,7 @@ int do_mount(struct user_jail_struct *info, const char *user, const char *root_p
 	if (mount("devpts", pts_path, "devpts",  MS_NOSUID|MS_NOEXEC, NULL) < 0) {
 		goto errout;
 	}
-
+#endif
 	setresuid(ruid, euid, suid);
 
 	return 0;
