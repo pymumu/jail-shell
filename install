@@ -110,6 +110,8 @@ install_files()
 	if [ $? -ne 0 ]; then
 		return 1
 	fi
+	#for selinux, change permission to lib_t
+	chcon --type lib_t $SECURITY_DIR/pam_jail_shell.so >/dev/null 2>&1
 
 	if [ ! -f "$PREFIX$JAIL_SHELL_CONF_DIR/jail-shell.conf" ]; then
 		install -v -m 0600 -t  $PREFIX$JAIL_SHELL_CONF_DIR pam_jail_shell/jail-shell.conf 
