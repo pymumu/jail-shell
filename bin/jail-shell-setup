@@ -69,12 +69,22 @@ get_root_dir()
 		return 1
 	fi
 
+	if [ ! -d "$JAIL_VAR_DIR" ]; then
+		create_dir $JAIL_VAR_DIR 0755 root:root
+		if [ $? -ne 0 ]; then
+			echo "create $JAIL_VAR_DIR failed"
+			return 1
+		fi
+		chcon --type tmp_t $JAIL_VAR_DIR >/dev/null 2>&1
+	fi
+
 	if [ ! -d "$JAIL_DIR" ]; then
 		create_dir $JAIL_DIR 0755 root:root
 		if [ $? -ne 0 ]; then
 			echo "create $JAIL_DIR failed"
 			return 1
 		fi
+		chcon --type tmp_t $JAIL_DIR >/dev/null 2>&1
 	fi
 
 	JAIL_DIR="`readlink -e $JAIL_DIR`"

@@ -163,7 +163,7 @@ int drop_cap(void)
 		}
 
 		if (prctl(PR_CAPBSET_DROP, cap_drop[i].cap, 0, 0) < 0) {
-			pam_log("Drop %s failed, errno %s\n", cap_drop[i].capname, strerror(errno));
+			//pam_log("Drop %s failed, errno %s\n", cap_drop[i].capname, strerror(errno));
 			continue;
 		}
 
