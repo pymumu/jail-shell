@@ -27,6 +27,7 @@
 
 #define  PAM_SM_SESSION
 #include <security/pam_modules.h>
+#include <security/pam_ext.h>
 #include <sys/prctl.h>
 
 #define MAX_GROUP_NUM  64
@@ -144,12 +145,18 @@ char *const namespace_opt[] = {
 
 int cap_drop_size = sizeof(cap_drop) / sizeof(struct cap_drop_struct);
 
-void pam_log(const char *format, ...) 
+pam_handle_t *jail_shell_pamh = NULL;
+
+void pam_log(int priority, const char *format, ...) 
 {
 	va_list args;
 
 	va_start(args, format);
-	vprintf(format, args);
+	if (jail_shell_pamh == NULL) {
+		vprintf(format, args);
+	} else {
+		pam_vsyslog(jail_shell_pamh, priority, format, args);
+	}
 	va_end(args);
 }
 
@@ -178,10 +185,12 @@ unsigned long get_rnd_number(void)
 
 	rnd_fd = open("/dev/urandom", O_RDONLY);
 	if (rnd_fd < 0) {
+		pam_log(LOG_ERR, "open /dev/urandom file failed, %s", strerror(errno));
 		goto errout;
 	}
 
 	if (read(rnd_fd, &rnd_num, sizeof(rnd_num)) != sizeof(rnd_num)) {
+		pam_log(LOG_ERR, "read /dev/urandom file failed, %s", strerror(errno));
 		goto errout;
 	}
 
@@ -228,6 +237,7 @@ int get_namespace_flag(char *namespace, int max_len)
 		case FLAG_NONE:
 			return 0;
 		default:
+			pam_log(LOG_ERR, "namespace option is invalid. %s", namespace);
 			return -1;
 			break;
 		}
@@ -252,6 +262,7 @@ int load_config(void)
 
 	fp = fopen(JAIL_CONF_PATH, "r");
 	if (fp == NULL) {
+		pam_log(LOG_ERR, "open %s file failed, %s", JAIL_CONF_PATH, strerror(errno));
 		return -1;
 	}
 
@@ -316,10 +327,12 @@ struct user_jail_struct *get_user_jail(pam_handle_t *pamh)
 
 	pwd = getpwnam(user);
 	if (pwd == NULL) {
+		pam_log(LOG_ERR, "get user passwd failed, user %s, %s", user, strerror(errno));
 		return NULL;
 	}
 
 	if (getgrouplist(user, pwd->pw_gid, groups, &ngroups) < 0) {
+		pam_log(LOG_ERR, "get group list for user %s failed, %s", user, strerror(errno));
 		return NULL;
 	}
 
@@ -349,6 +362,7 @@ struct user_jail_struct *get_user_jail(pam_handle_t *pamh)
 int do_chroot(const char *path)
 {
 	if (chroot(path) < 0) {
+		pam_log(LOG_ERR, "chroot %s failed, %s", path, strerror(errno));
 		return -1;
 	}
 
@@ -365,20 +379,20 @@ int try_lock_pid(const char *pid_file, int no_close_exec)
 	/*  create pid file, and lock this file */
 	fd = open(pid_file, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
 	if (fd == -1) {
-		fprintf(stderr, "create pid file failed, %s", strerror(errno));
+		pam_log(LOG_ERR, "create pid file %s failed, %s", pid_file, strerror(errno));
 		return -1;
 	}
 
 	flags = fcntl(fd, F_GETFD); 
 	if (flags < 0) {
-		fprintf(stderr, "Could not get flags for PID file %s", pid_file);
+		pam_log(LOG_ERR, "get flags for pid file %s failed, %s", pid_file, strerror(errno));
 		goto errout;
 	}
 
 	if (no_close_exec == 0) {
 		flags |= FD_CLOEXEC; 
 		if (fcntl(fd, F_SETFD, flags) == -1) {
-			fprintf(stderr, "Could not set flags for PID file %s", pid_file);
+			pam_log(LOG_ERR, "set flags for pid file %s failed, %s", pid_file, strerror(errno));
 			goto errout;
 		}
 	}
@@ -405,6 +419,7 @@ int mount_from_cfg(struct user_jail_struct *info, const char *user)
 
 	ret = system(mount_cmd);
 	if (ret != 0) {
+		pam_log(LOG_ERR, "run  %s failed, ret = %d", mount_cmd, ret);
 		return -1;
 	}
 
@@ -421,6 +436,7 @@ int do_mount(struct user_jail_struct *info, const char *user, const char *root_p
 	uid_t ruid;
 	uid_t euid;
 	uid_t suid;
+	int ret = 0;
 
 	snprintf(proc_path, PATH_MAX, "%s/proc", root_path);
 	snprintf(pts_path, PATH_MAX, "%s/dev/pts", root_path);
@@ -434,7 +450,8 @@ int do_mount(struct user_jail_struct *info, const char *user, const char *root_p
 	mkdir(pts_path, 0755);
 
 	if (getresuid(&ruid, &euid, &suid) != 0) {
-		return 1;	
+		pam_log(LOG_ERR, "get resuid failed, %s", strerror(errno));
+		return -1;	
 	}
 
 	setresuid(0, 0, 0);
@@ -453,12 +470,16 @@ int do_mount(struct user_jail_struct *info, const char *user, const char *root_p
 	}
 
 	snprintf(mount_cmd, PATH_MAX, "mount -t proc proc %s -o nosuid,noexec,nodev", proc_path);
-	if (system(mount_cmd) != 0) {
+	ret = system(mount_cmd);
+	if (ret != 0) {
+		pam_log(LOG_ERR, "run %s failed, ret = %d", mount_cmd, ret);
 		goto errout;
 	}
 
 	snprintf(mount_cmd, PATH_MAX, "mount -t devpts devpts %s -o nosuid,noexec", pts_path);
-	if (system(mount_cmd) != 0) {
+	ret = system(mount_cmd);
+	if (ret != 0) {
+		pam_log(LOG_ERR, "run %s failed, ret = %d", mount_cmd, ret);
 		goto errout;
 	}
 #if 0
@@ -476,7 +497,7 @@ int do_mount(struct user_jail_struct *info, const char *user, const char *root_p
 	return 0;
 errout:
 	setresuid(ruid, euid, suid);
-	return 1;
+	return -1;
 }
 
 void jail_init(struct user_jail_struct *info, char *user, char *pid_file, char *chroot_path)
@@ -525,6 +546,7 @@ void jail_init(struct user_jail_struct *info, char *user, char *pid_file, char *
 	argv[4] = str_fd;
 
 	execv(argv[0], argv);
+	pam_log(LOG_ERR, "execve %s failed, %s", argv[0], strerror(errno));
 out:
 	_exit(0);
 }
@@ -540,6 +562,7 @@ int create_jail_ns(struct user_jail_struct *info, char *user, char *pid_file, ch
 			return do_mount(info, user, chroot_path);
 		}
 		if (unshare(info->namespace_flag) != 0) {
+			pam_log(LOG_ERR, "unshare %d failed, user %s, %s", info->namespace_flag, user, strerror(errno));
 			return -1;
 		}
 	} else {
@@ -549,6 +572,7 @@ int create_jail_ns(struct user_jail_struct *info, char *user, char *pid_file, ch
 
 	pid = fork();
 	if (pid < 0) {
+		pam_log(LOG_ERR, "fork jail-init failed, %s", strerror(errno));
 		return -1;
 	} else if (pid == 0) {
 		/*  start user's init process */
@@ -557,6 +581,7 @@ int create_jail_ns(struct user_jail_struct *info, char *user, char *pid_file, ch
 
 	fd = open(pid_file, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
 	if (fd < 0) {
+		pam_log(LOG_ERR, "open pid file %s failed, %s", pid_file, strerror(errno));
 		goto errout;
 	}
 
@@ -565,6 +590,7 @@ int create_jail_ns(struct user_jail_struct *info, char *user, char *pid_file, ch
 	/*  write init pid to pid file */
 	snprintf(buff, TMP_BUFF_LEN_32, "%d\n", pid);
 	if (write(fd, buff, strnlen(buff, TMP_BUFF_LEN_32)) < 0) {
+		pam_log(LOG_ERR, "write pid to file failed, %s", strerror(errno));
 		goto errout;
 	}
 
@@ -592,10 +618,12 @@ int enter_ns(int pid, char *ns_name, int flag)
 
 	fd = open(ns_file, O_RDONLY);
 	if (fd < 0) {
+		pam_log(LOG_ERR, "open ns file %s failed, %s", ns_file, strerror(errno));
 		return -1;
 	}
 
 	if (setns(fd, flag) != 0) {
+		pam_log(LOG_ERR, "set ns %s failed, %s", ns_file, strerror(errno));
 		close(fd);
 		return -1;
 	}
@@ -620,27 +648,25 @@ int enter_jail_ns(struct user_jail_struct *info, const char *user, char *pid_fil
 	if (fd < 0) {
 		if (errno == ENOENT) {
 			return 0;
-		}
+		} 
+		pam_log(LOG_ERR, "open pid file  %s failed, %s", pid_file, strerror(errno));
 		return -1;
 	}
 
 	/*  read jail init process pid */
 	if (read(fd, buff, sizeof(buff)) < 0) {
-		ret = 1;
+		ret = -1;
+		pam_log(LOG_ERR, "read pid file %s failed, %s", pid_file, strerror(errno));
 		goto out;
 	}
 
 	ns_pid = atoi(buff);
 	if (ns_pid <= 0) {
-		ret = 1;
+		ret = -1;
+		pam_log(LOG_ERR, "get pid %s from %s failed.", buff, pid_file);
 		goto out;
 	}
 
-	ns_pid = atoi(buff);
-	if (ns_pid <= 0) {
-		ret = 1;
-		goto out;
-	}
 #ifdef __NR_setns
 	/*  enter ipc namespace */
 	if (enter_ns(ns_pid, "ipc", CLONE_NEWIPC) != 0) {
@@ -732,6 +758,7 @@ int set_jsid_env(pam_handle_t *pamh, struct user_jail_struct *info, const char *
 		jsid_fd = open(jsid_file_path, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
 		if (jsid_fd < 0) {
 			ret = -1;
+			pam_log(LOG_ERR, "open jsid file  %s failed, %s", jsid_file_path, strerror(errno));
 			goto out;
 		}
 
@@ -747,6 +774,7 @@ int set_jsid_env(pam_handle_t *pamh, struct user_jail_struct *info, const char *
 		snprintf(buff, MAX_LINE_LEN, "%lu\n", rnd_num);
 		if (write(jsid_fd, buff, strnlen(buff, MAX_LINE_LEN)) < 0) {
 			ret = -1;
+			pam_log(LOG_ERR, "write jsid failed, file %s, %s", jsid_file_path, strerror(errno));
 			goto out;
 		}
 
@@ -754,6 +782,7 @@ int set_jsid_env(pam_handle_t *pamh, struct user_jail_struct *info, const char *
 		snprintf(buff, MAX_LINE_LEN, "%s\n", user);
 		if (write(jsid_fd, buff, strnlen(buff, MAX_LINE_LEN)) < 0) {
 			ret = -1;
+			pam_log(LOG_ERR, "write user name failed, file %s, %s", jsid_file_path, strerror(errno));
 			goto out;
 		}
 
@@ -761,6 +790,7 @@ int set_jsid_env(pam_handle_t *pamh, struct user_jail_struct *info, const char *
 		snprintf(buff, MAX_LINE_LEN, "%s\n", info->jail);
 		if (write(jsid_fd, buff, strnlen(buff, MAX_LINE_LEN)) < 0) {
 			ret = -1;
+			pam_log(LOG_ERR, "write jail name failed, file %s, %s", jsid_file_path, strerror(errno));
 			goto out;
 		}
 
@@ -770,6 +800,7 @@ int set_jsid_env(pam_handle_t *pamh, struct user_jail_struct *info, const char *
 		int len = read(jsid_fd, buff, MAX_LINE_LEN - 1);
 		if ( len < 0) {
 			ret = -1;
+			pam_log(LOG_ERR, "read jsid failed, file %s, %s", jsid_file_path, strerror(errno));
 			goto out;
 		}
 		buff[len] = 0;
@@ -784,6 +815,7 @@ int set_jsid_env(pam_handle_t *pamh, struct user_jail_struct *info, const char *
 
 	/*  set JSID enviroment to shell */
 	if (pam_putenv(pamh, jsid_env) != PAM_SUCCESS) {
+		pam_log(LOG_ERR, "put env failed, user  %s, %s", user, strerror(errno));
 		return PAM_SERVICE_ERR;
 	}
 
@@ -813,6 +845,7 @@ int wait_proc_mounted(const char *root_path)
 		count++;
 		/* wait for 5 seconds */
 		if (count > 10 * 5) {
+			pam_log(LOG_ERR, "wait for %s mount time out.", proc_uname_path);
 			return -1;
 		}
 	}
@@ -866,7 +899,8 @@ int run_jail_post_script(const char *user, struct user_jail_struct *info)
 	}
 
 	if (getresuid(&ruid, &euid, &suid) != 0) {
-		return 1;	
+		pam_log(LOG_ERR, "get resuid for %s failed, %s", user, strerror(errno));
+		return -1;	
 	}
 
 	setresuid(0, 0, 0);
@@ -876,6 +910,7 @@ int run_jail_post_script(const char *user, struct user_jail_struct *info)
 	ret = system(post_cmd);
 	setresuid(ruid, euid, suid);
 	if (ret != 0) {
+		pam_log(LOG_ERR, "run %s failed, ret %d", post_cmd, ret);
 		return -1;
 	}
 
@@ -892,6 +927,7 @@ int start_jail(pam_handle_t *pamh, int flags, int argc, const char *argv[])
 
 	/*  get username from pam */
 	if (pam_get_user(pamh, &user_pam, NULL) != PAM_SUCCESS) {
+		pam_log(LOG_ERR, "pam get user failed.");
 		return PAM_USER_UNKNOWN;
 	}
 	strncpy(user, user_pam, MAX_LINE_LEN);
@@ -911,6 +947,7 @@ int start_jail(pam_handle_t *pamh, int flags, int argc, const char *argv[])
 	 *  if JSID exists, read from existrs and set.
 	 */
 	if (set_jsid_env(pamh, info, user) != 0) {
+		pam_log(LOG_INFO, "set env failed, user %s.", user);
 		return PAM_SERVICE_ERR;
 	}
 
@@ -918,21 +955,25 @@ int start_jail(pam_handle_t *pamh, int flags, int argc, const char *argv[])
 	 * run jail-shell-post script, in order to add user entry in /etc/passwd
 	 */
 	if (run_jail_post_script(user, info) != 0) {
+		pam_log(LOG_ERR, "run jail post script failed, user %s.", user);
 		return PAM_SERVICE_ERR;
 	}
 
 	snprintf(jail_path, MAX_LINE_LEN, "%s/%s", jail_home, info->jail);
 	if (unshare_pid(info, user, jail_path) != 0) {
+		pam_log(LOG_ERR, "unshared namespace failed, user %s.", user);
 		return PAM_SERVICE_ERR;
 	}
 
 	/*  chroot to jail directory */
 	if (do_chroot(jail_path) < 0) {
+		pam_log(LOG_ERR, "chroot failed. user %s", user);
 		return PAM_SERVICE_ERR;
 	}
 
 	/*  Drop all unnesseary cap */
 	if (drop_cap() != 0) {
+		pam_log(LOG_ERR, "drop cap failed, user %s.", user);
 		return PAM_SERVICE_ERR;
 	}
 
@@ -957,6 +998,7 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc, const c
 
 PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags, int argc, const char *argv[])
 {
+	jail_shell_pamh = pamh;
 	if (start_jail(pamh, flags, argc, argv) != PAM_SUCCESS) {
 		return PAM_USER_UNKNOWN;
 	}
