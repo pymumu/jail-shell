@@ -198,8 +198,8 @@ dir()
 		echo "arg number is invalid"
 		return 1
 	fi
-	user=${userinfo##*:}
-	group=${userinfo#*:}
+	user=${userinfo%%:*}
+	group=${userinfo##*:}
 	install -o $user -g $group -m $2 -d $JAIL_ROOT_DIR/$1  
 }
 
@@ -216,8 +216,8 @@ file()
 		return 1
 	fi
 
-	user=${userinfo##*:}
-	group=${userinfo#*:}
+	user=${userinfo%%:*}
+	group=${userinfo##*:}
 	link_cp $1 $JAIL_ROOT_DIR/$2 0
 	if [ $? -ne 0 ]; then
 		return 1
@@ -303,8 +303,8 @@ cmd()
 		return 1
 	fi
 
-	user=${userinfo##*:}
-	group=${userinfo#*:}
+	user=${userinfo%%:*}
+	group=${userinfo##*:}
 
 	if [ -z "$user" ] || [ -z "$group" ]; then
 		echo "user or group is invalid."
