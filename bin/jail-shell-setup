@@ -27,6 +27,11 @@ showhelp()
 	echo "  --user [name]             mount user, this paramter must before --mount."
 	echo "  --mount [name]            mount directory to a jail-shell."
 	echo "  -h, --help                show this help message."
+	echo ""
+	echo " tool for creating chroot enviroment"
+	echo "  --chroot                  create a chroot enviroment."
+	echo "  --cfg [cfg]               configruation file."
+	echo "  --root [root path]        root path."
 }
 
 create_dir()
@@ -63,7 +68,7 @@ create_dir()
 get_root_dir()
 {
 	# get JAIL_HOME directory path from jail-shell.conf file.
-	JAIL_DIR="`grep "^ *JAIL_HOME " $JAIL_SHELL_CONF | awk '{print $2}' 2>/dev/null`"
+	JAIL_DIR="`grep "^ *JAIL_HOME " $JAIL_SHELL_CONF 2>/dev/null | awk '{print $2}' 2>/dev/null`"
 	
 	if [ -z "$JAIL_DIR" ]; then
 		return 1
@@ -144,7 +149,7 @@ cp_lib()
 		ldd $FILE >> $LIBS_FILE 2>/dev/null
 	done < $ELF_FILE_LIST
 
-	sort $LIBS_FILE | grep -v "not a dynamic" | grep -v "linux-vdso.so" | awk '{if(NF == 2){print $1}else{print $3}}' | uniq > $LIBS_ALL_FILE
+	sort $LIBS_FILE | grep -v "^ldd:" |grep -v "not a dynamic" | grep -v "linux-vdso.so" | awk '{if(NF == 2){print $1}else{print $3}}' | uniq > $LIBS_ALL_FILE
 
 	while read FILE
 	do
@@ -402,10 +407,12 @@ setup_basic_files()
 	fi
 
 	# copy init to jail
-	clink $JAIL_SHELL_HOME/bin/jail-init /usr/bin/init
-	if [ $? -ne 0 ]; then
-		echo "copy jail-init failed."
-		return 1
+	if [ $CREATE_CHROOT -eq 0 ]; then
+		clink $JAIL_SHELL_HOME/bin/jail-init /usr/bin/init
+		if [ $? -ne 0 ]; then
+			echo "copy jail-init failed."
+			return 1
+		fi
 	fi
 
 	cp_lib 
@@ -514,6 +521,47 @@ setup_jail()
 	fi
 }
 
+create_chroot()
+{
+	local jail_root=$1
+	local jail_cfg=$2
+	local jail_name=""
+	
+	CREATE_CHROOT=1
+
+	if [ -z "$jail_root" ]; then
+		echo "Please input root path."
+		return 1
+	fi	
+
+	if [ ! -d "`dirname $jail_root`" ]; then
+		echo "directory `dirname $jail_root` doesn't exist."
+		return 1
+	fi
+
+	JAIL_DIR="$(cd $(dirname $jail_root); pwd)"
+	jail_name="`basename $jail_root`"
+
+	if [ -z "$JAIL_DIR" ] || [ ! -d "$JAIL_DIR" ]; then
+		echo "Directory doesn't exist $JAIL_DIR"
+		return 1
+	fi
+
+	if [ -z "$jail_name" ]; then
+		echo "Get directory failed, $1"
+		return 1
+	fi
+
+	if [ ! -f "$jail_cfg" ]; then
+		echo "chroot config file $jail_cfg doesn't exist."
+		return 1
+	fi
+
+	process_cfg $jail_name $jail_cfg "setup"
+	if [ $? -ne 0 ]; then
+		return 1;
+	fi
+}
 
 clean_jail() 
 {
@@ -533,12 +581,12 @@ clean_jail()
 	fi
 
 	# kill all process in jail, and umount directories.
-	which fuser >/dev/null
+	which fuser >/dev/null 2>&1
 	if [ $? -ne 0 ]; then
 		printf "\033[31mneed fuser command to kill process, please install.\033[0m\n"
 		echo "clean may not success."
 	fi
-	fuser -k $JAIL_PATH >/dev/null
+	fuser -k $JAIL_PATH >/dev/null 2>&1
 
 	cat /proc/mounts | grep "/$JAIL_NAME[/| ]" | tac | awk '{print $2}' | uniq | xargs -i umount {} 
 	if [ $? -ne 0 ]; then
@@ -670,35 +718,38 @@ mount_jail()
 
 }
 
-list_jail() 
+list_jail()
+{
+	if [ -d "$JAIL_DIR/$JAIL_NAME" ]; then
+		printf "%-24s%-24s%-24s\n" "$JAIL_NAME" "Installed" "$JAIL_DIR/$JAIL_NAME"
+	else
+		printf "%-24s%-24s%-24s\n" "$JAIL_NAME" "Not Installed" "N/A"
+	fi
+}
+
+list_jails() 
 {
 	printf "%-24s%-24s%-24s\n" "[Jail]" "[Install]" "[Root Path]"
+	
 	for JAIL_CFG in `ls $CONF_PATH/*.cfg 2>/dev/null`
 	do
 		JAIL_NAME="`basename $JAIL_CFG .cfg`"
-		if [ -d "$JAIL_DIR/$JAIL_NAME" ]; then
-			printf "%-24s%-24s%-24s\n" "$JAIL_NAME" "Installed" "$JAIL_DIR/$JAIL_NAME"
-		else
-			printf "%-24s%-24s%-24s\n" "$JAIL_NAME" "Not Installed" "N/A"
-		fi
+		list_jail
 	done	
 }
 
 main()
 {
 	local USER=""
-	OPTS=`getopt -o h --long help,install:,remove:,clean:,user:,mount:,list \
+	local ACTION=""
+	local JAIL_NAME=""
+
+	OPTS=`getopt -o h --long help,install:,remove:,clean:,user:,mount:,list,chroot,cfg:,root: \
 		-n  "" -- "$@"`
 
 	if [ $# -eq 0 ]; then
 		showhelp
 		return 0
-	fi
-
-	get_root_dir
-	if [ $? -ne 0 ]; then
-		echo "Please config JAIL_HOME path at file '$JAIL_SHELL_CONF'"
-		return 1
 	fi
 
 	if [ $? != 0 ] ; then echo "Terminating..." >&2 ; exit 1 ; fi
@@ -713,32 +764,67 @@ main()
 			return $!
 			shift ;;
 		--install )
-			install_jails $2
-			return $?
+			JAIL_NAME="$2"
+			ACTION="INSTALL"
 			shift 2;;
 		--remove )
-			remove_jail $2
-			return $?
+			JAIL_NAME="$2"
+			ACTION="REMOVE"
 			shift 2;;
 		--clean )
-			clean_jails $2
-			return $?
+			JAIL_NAME="$2"
+			ACTION="CLEAN"
 			shift 2;;
 		--user )
 			USER="$2"
 			shift 2;;
 		--mount )
-			mount_jail $2 $USER
-			return $?
+			JAIL_NAME="$2"
+			ACTION="MOUNT"
 			shift 2;;
 		--list )
-			list_jail
-			return 0
-			;;
+			ACTION="LIST"	
+			shift 1;;
+		--chroot )
+			ACTION="CHROOT";
+			shift ;;
+		--cfg )
+			CHROOT_CFG_FILE="$2"
+			shift 2;;
+		--root )
+			CHROOT_ROOT_PATH="$2"
+			shift 2;;
 		-- ) shift; break ;;
 		* ) break ;;
   		esac
 	done
+
+	if [ "$ACTION" = "CHROOT" ]; then
+		create_chroot "$CHROOT_ROOT_PATH" "$CHROOT_CFG_FILE"
+		return $?
+	fi
+
+	CREATE_CHROOT=0
+
+	get_root_dir
+	if [ $? -ne 0 ]; then
+		echo "Please config JAIL_HOME path at file '$JAIL_SHELL_CONF'"
+		return 1
+	fi
+
+	if [ "$ACTION" = "INSTALL" ]; then
+		install_jails $JAIL_NAME
+	elif [ "$ACTION" = "REMOVE" ]; then
+		remove $JAIL_NAME
+	elif [ "$ACTION" = "CLEAN" ]; then
+		clean_jails $JAIL_NAME
+	elif [ "$ACTION" = "MOUNT" ]; then
+		mount_jail $JAIL_NAME $USER
+	elif [ "$ACTION" = "LIST" ]; then
+		list_jails 
+	else
+		showhelp
+	fi
 }
 
 main $@
