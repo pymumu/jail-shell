@@ -125,7 +125,8 @@ link_cp()
 	fi
 
 	link_target_dir="`readlink -e $target_dir`"
-	if [ "$target_dir" != "$link_target_dir" ]; then
+	check_dir="$(cd $target_dir; pwd)"
+	if [ "$check_dir" != "$link_target_dir" ]; then
 		target="$JAIL_ROOT_DIR/$link_target_dir/`basename $target`"
 	fi
 
@@ -149,6 +150,12 @@ cp_lib()
 		ldd $FILE >> $LIBS_FILE 2>/dev/null
 	done < $ELF_FILE_LIST
 
+	NOT_FOUND="`cat $LIBS_FILE | grep "not found" | awk '{print $1}'`"
+	if [ ! -z "$NOT_FOUND" ]; then
+		echo "The following libraries are not found, please make sure all libraries exist and in the library search path"
+		echo "$NOT_FOUND"
+		return 1
+	fi
 	sort $LIBS_FILE | grep -v "^ldd:" |grep -v "not a dynamic" | grep -v "linux-vdso.so" | awk '{if(NF == 2){print $1}else{print $3}}' | uniq > $LIBS_ALL_FILE
 
 	while read FILE
@@ -230,7 +237,7 @@ file()
 	chmod $3 $JAIL_ROOT_DIR/$2
 	chown $user:$group $JAIL_ROOT_DIR/$2
 
-	add_elf_file "$JAIL_ROOT_DIR/$2"
+	add_elf_file "$1"
 }
 
 clink() 
@@ -263,7 +270,7 @@ clink()
 		return 1
 	fi
 
-	add_elf_file "$JAIL_ROOT_DIR/$2"
+	add_elf_file "$1"
 }
 
 hlink()
@@ -278,7 +285,7 @@ hlink()
 		return 1
 	fi
 
-	add_elf_file "$JAIL_ROOT_DIR/$2"
+	add_elf_file "$1"
 }
 
 slink()
