@@ -469,7 +469,7 @@ int do_mount(struct user_jail_struct *info, const char *user, const char *root_p
 		goto errout;
 	}
 
-	snprintf(mount_cmd, PATH_MAX, "mount -t proc proc %s -o nosuid,noexec,nodev", proc_path);
+	snprintf(mount_cmd, PATH_MAX, "mount -t proc proc %s -o nosuid,noexec,nodev,ro", proc_path);
 	ret = system(mount_cmd);
 	if (ret != 0) {
 		pam_log(LOG_ERR, "run %s failed, ret = %d", mount_cmd, ret);
