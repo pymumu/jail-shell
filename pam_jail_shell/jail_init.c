@@ -122,7 +122,7 @@ void help(void)
 		"  -h            help message.\n"
 		"\n"
 		;
-	printf(help);
+	printf("%s", help);
 }
 
 int main(int argc, char *argv[])

@@ -59,7 +59,7 @@ void help(void)
 		"  -h            show this help message.\n"
 		"\n"
 		;
-	printf(help);
+	printf("%s", help);
 }
 
 int create_pid_file(const char *pid_file)
@@ -819,7 +819,7 @@ CMD_RETURN write_mirror(struct cmdd_context *context)
 		context->mirror_data.curr_offset = 0;
 	} else  {
 		fprintf(stderr, "BUG: internal error, data length mismach.");
-		return CMD_MSG_DATA_ERR;
+		return CMD_RETURN_ERR;
 	}
 
 	if (context->is_sock_eof == 0 || context->recv_data.total_len > context->recv_data.curr_offset) {

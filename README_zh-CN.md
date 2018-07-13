@@ -1,5 +1,7 @@
 jail-shell安全受限shell
 ==============
+[![Build Status](https://travis-ci.org/pymumu/jail-shell.svg?branch=master)](https://travis-ci.org/pymumu/jail-shell)  
+
 jail-shell安全受限shell是一个Linux环境下的安全工具，主要使用chroot, namespace技术，限制用户执行特定的命令，和访问特定的目录。 
 
 可将用户通过ssh, scp, sftp，telnet, 终端等方式登录限制到安全的运行环境中。 

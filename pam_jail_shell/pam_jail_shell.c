@@ -273,7 +273,7 @@ int load_config(void)
 		}
 
 		if (filedNum == 2) {
-			if (strncmp(filed1, JAIL_HOME_CONFIG, sizeof(filed1) != 0)) {
+			if (strncmp(filed1, JAIL_HOME_CONFIG, sizeof(filed1)) != 0) {
 				continue;
 			}
 			strncpy(jail_home, filed2, MAX_FIELD_LEN);
@@ -366,7 +366,9 @@ int do_chroot(const char *path)
 		return -1;
 	}
 
-	chdir("/");
+	if (chdir("/") != 0) {
+		pam_log(LOG_WARNING, "chdir / failed, %s", path, strerror(errno));	
+	}
 	
 	return 0;
 }
@@ -454,7 +456,10 @@ int do_mount(struct user_jail_struct *info, const char *user, const char *root_p
 		return -1;	
 	}
 
-	setresuid(0, 0, 0);
+	if (setresuid(0, 0, 0) != 0) {
+		pam_log(LOG_ERR, "set resuid failed, %s", strerror(errno));
+		return -1;	
+	}
 #if 0
 	mount("none", "/", NULL, MS_REC|MS_PRIVATE, NULL);
 	mount("none", "/proc", NULL, MS_REC|MS_PRIVATE, NULL);
@@ -462,8 +467,17 @@ int do_mount(struct user_jail_struct *info, const char *user, const char *root_p
 
 	/*  For selinux call shell command to mount directory */
 	/*  mount API may fail, when selinux is enabled. */
-	system("mount --make-rprivate /");
-	system("mount --make-rprivate /proc");
+	ret = system("mount --make-rprivate /");
+	if (ret != 0) {
+		pam_log(LOG_ERR, "mount --make-rprivate / failed, ret = %d", mount_cmd, ret);
+		goto errout;
+	}
+
+	ret = system("mount --make-rprivate /proc");
+	if (ret != 0) {
+		pam_log(LOG_ERR, "mount --make-rprivate /proc failed, ret = %d", mount_cmd, ret);
+		goto errout;
+	}
 
 	if (mount_from_cfg(info, user) != 0) {
 		goto errout;
@@ -492,11 +506,16 @@ int do_mount(struct user_jail_struct *info, const char *user, const char *root_p
 		goto errout;
 	}
 #endif
-	setresuid(ruid, euid, suid);
+	if (setresuid(ruid, euid, suid) != 0) {
+		pam_log(LOG_ERR, "set suid failed");
+		goto errout;
+	}
 
 	return 0;
 errout:
-	setresuid(ruid, euid, suid);
+	if (setresuid(ruid, euid, suid) != 0) {
+
+	}
 	return -1;
 }
 
@@ -585,7 +604,9 @@ int create_jail_ns(struct user_jail_struct *info, char *user, char *pid_file, ch
 		goto errout;
 	}
 
-	ftruncate(fd, 0);
+	if (ftruncate(fd, 0) != 0) {
+		pam_log(LOG_WARNING, "truncate file %s failed, %s", pid_file, strerror(errno));
+	}
 
 	/*  write init pid to pid file */
 	snprintf(buff, TMP_BUFF_LEN_32, "%d\n", pid);
@@ -768,7 +789,9 @@ int set_jsid_env(pam_handle_t *pamh, struct user_jail_struct *info, const char *
 			goto out;
 		}
 
-		ftruncate(jsid_fd, 0);
+		if (ftruncate(jsid_fd, 0) != 0) {
+			pam_log(LOG_WARNING, "truncate file %s failed, %s", jsid_file_path, strerror(errno));
+		}
 
 		/*  write JSID number */
 		snprintf(buff, MAX_LINE_LEN, "%lu\n", rnd_num);
@@ -903,12 +926,18 @@ int run_jail_post_script(const char *user, struct user_jail_struct *info)
 		return -1;	
 	}
 
-	setresuid(0, 0, 0);
+	if (setresuid(0, 0, 0) != 0) {
+		pam_log(LOG_WARNING, "set resuid for %s failed, %s", user, strerror(errno));
+	}
 
 	/* LOGIN_POST_SCRIPT %user% %jail_root_path%*/
 	snprintf(post_cmd, PATH_MAX, "%s %s %s/%s", LOGIN_POST_SCRIPT, user, jail_home, info->jail);
 	ret = system(post_cmd);
-	setresuid(ruid, euid, suid);
+	
+	if (setresuid(ruid, euid, suid) != 0) {
+		pam_log(LOG_WARNING, "set resuid for %s failed, %s", user, strerror(errno));
+	}
+
 	if (ret != 0) {
 		pam_log(LOG_ERR, "run %s failed, ret %d", post_cmd, ret);
 		return -1;

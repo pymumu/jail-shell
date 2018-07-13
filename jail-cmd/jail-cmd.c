@@ -43,7 +43,7 @@ void help(void)
 		"run jail command.\n"
 	   	"press CTRL+] to exit.\n"
 		;
-	printf(help);
+	printf("%s", help);
 }
 
 int set_term(void)
@@ -97,7 +97,7 @@ int cmd_init(struct cmd_context *context, int argc, char *argv[])
 	if (cmd->isatty) {
 		/*  send term name to server */
 		if (getenv("TERM") != NULL) {
-			snprintf(cmd->term, TMP_BUFF_LEN_32, getenv("TERM"));
+			snprintf(cmd->term, TMP_BUFF_LEN_32, "%s", getenv("TERM"));
 		} else {
 			snprintf(cmd->term, TMP_BUFF_LEN_32, "xterm");
 		}
@@ -188,12 +188,16 @@ CMD_RETURN process_cmd(struct cmd_context *context, struct jail_cmd_head *cmd_he
 	case CMD_MSG_DATA_OUT: {
 		 /*  Write out data to stdout */
 		struct jail_cmd_data *cmd_data = (struct jail_cmd_data *)cmd_head->data;
-		write(STDOUT_FILENO, cmd_data->data, cmd_head->data_len);
+		if (write(STDOUT_FILENO, cmd_data->data, cmd_head->data_len) < 0) {
+			fprintf(stderr, "write data to stdout failed.\r\n");
+		}
 		break; }
 	case CMD_MSG_DATA_ERR: {
 		 /*  Write err data to stderr */
 		struct jail_cmd_data *cmd_data = (struct jail_cmd_data *)cmd_head->data;
-		write(STDERR_FILENO, cmd_data->data, cmd_head->data_len);
+		if (write(STDERR_FILENO, cmd_data->data, cmd_head->data_len) < 0) {
+			fprintf(stderr, "write data to stderr failed.\r\n");	
+		}
 		break; }
 	case CMD_MSG_EXIT_CODE: {
 		/*  get exit code from peer child process */

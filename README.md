@@ -1,5 +1,6 @@
 Jail-Shell
 ==============
+[![Build Status](https://travis-ci.org/pymumu/jail-shell.svg?branch=master)](https://travis-ci.org/pymumu/jail-shell)  
 
 [中文REAMDME请看这里](README_zh-CN.md)
 
