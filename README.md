@@ -249,6 +249,10 @@ License
 ==============
 Jail-shell using GPL-V2 License.
 
+Donate
+==============
+[![Support via PayPal](https://cdn.rawgit.com/twolfson/paypal-github-button/1.0.0/dist/button.svg)](https://paypal.me/PengNick/)
+
 Similar tools
 ==============
 [jailkit https://olivier.sessink.nl/jailkit/](https://olivier.sessink.nl/jailkit/)  
