@@ -4,9 +4,9 @@ Jail-Shell
 
 [中文REAMDME请看这里](README_zh-CN.md)
 
-Jail-shell is a linux security tool mainly using chroot, namespaces technologies, limiting users to perform specific commands, and access sepcific directories.  
+Jail-shell is a Linux security tool mainly using chroot, namespaces technologies, limiting users to perform specific commands, and access specific directories.  
 
-Users can login through SSH, SCP, SFTP, Telnet, terminals, etc. and restrict them to a secure operating enviroment.  
+Users can login through SSH, SCP, SFTP, Telnet, terminals, etc. and be restricted to a secure operating enviroment.  
 
 Jail-shell can be used for webhost ssh access control, enterprise Administrator's privilege hierarchy management.  
 
@@ -14,19 +14,19 @@ Features
 ==============
 - **Easy to use**
 
-Through the configuration file, jail-shell automatically generates the chroot running environment, through jail-shell management commands, it's very easy to add, list, delete, restrict users, and easy to install, delete chroot running environment. 
+Through the configuration file jail-shell automatically generates the chroot running environment. Through jail-shell management commands it's very easy to add, list, delete, restrict users, and easy to install, delete chroot running environment. 
 
 - **Chroot technology limits user access**
 
-The Linux chroot technology is used to restrict the user's directory access, to avoid users access to restricted directories and to prevent users from destroying the system.
+The Linux chroot technology is used to restrict the user's directory access, to avoid users accessing restricted directories and to prevent users from destroying the system.
 
 - **Directory read-only protection**
 
-The chroot running enviroment is readonly, this avoid users to delete proteceded directories and files, avoid users to create device files, access restricted files.
+The chroot running enviroment is readonly, this prevents users from deleting protected directories and files, creating device files, and accessing restricted files.
 
 - **Namespace limit user Visible range**
 
-Use Linux namespace technology, limit the visible range of user PID, Mount directories, and avoid information leackage.
+Use Linux namespace technology, limit the visible range of user PID, Mount directories, and avoid information leakage.
 
 - **System command channel**
 
@@ -34,11 +34,11 @@ Provides a system command-and-proxy channel that allows users to execute a real 
 
 - **Automatic processing of chroot Environment command library dependencies**
 
-Only a list of commands is required to automatically copy the dynamic library that the command relies on to the chroot environment, avoiding the cumbersome work of copying the dynamic library manually
+Only a list of commands is required to automatically copy the dynamic library that the command relies on to the chroot environment, avoiding the cumbersome work of copying the dynamic library manually.
 
 - **Capabilities Restrictions**
 
-Discard critical capabilities privileges to avoid the system, and the chroot running environment cracked by rootkit.
+Discard critical capabilities privileges to avoid the system, and the chroot running environment, being cracked by rootkit.
 
 - **Multi-Linux operating system support**
 
@@ -51,20 +51,20 @@ Jail-shell contains 3 parts, Pam Plugins, jail-cmd command agents, Jail-shell co
 
 - **pam_jail_shell Plugins**
 
-Mainly control the login of users. according th the configuration list, use chroot and namespace technology to restrict the login users to a specific restricted directory.
+Mainly control the login of users. according to the configuration list, use chroot and namespace technology to restrict the login users to a specific restricted directory.
 
 - **jail-cmd command-and-proxy**
 
-It forwards specific command to the real system, such as `passwd`, or other user-related bussiness command, and it also prevent command injection.
+It forwards specific command to the real system, such as `passwd`, or other user-related business commands, and it also prevents command injection.
 
 - **jail-shell commandline tool**
 
 Mainly provides the ability to manage the restricted security shell, making it easier for administrators to use, including user's add, delete, shell's configuration, installation, deletion, etc.
 
-**instructions**
-1. According to the configuration, pam_jail_shell limit users to the specificed chroot enviroment.
-2. Administrators use jail-shell command manage the list of restricted users, manage the list of commands for the chroot enviroment, manage the access range of directories.
-3. Jail-cmd proxies specific command, to help implement the nessary business functions.
+**Instructions**
+1. According to the configuration, pam_jail_shell limits users to the specified chroot enviroment.
+2. Administrators use jail-shell command to manage the list of restricted users, manage the list of commands for the chroot enviroment, and manage the access range of directories.
+3. Jail-cmd proxies specific command, to help implement the necessary business functions.
 
 
 Compile and install 
@@ -211,7 +211,7 @@ Security Tips
 ==============
 When using jail-shell, the minimum security authorization principle should be adopted. In the premise of ensuring the use of functions, reduce user rights.
 1. `bind` tips
-  * Except `/dev` directory, it is recommended to add `nodev` parameters, /dev directory must set to `ro, noexec` (read-only, disable executables) permissions.
+  * Except `/dev` directory, it is recommended to add `nodev` parameters, /dev directory must set to `ro, noexec` (read-only, disable executable) permissions.
   * For the chroot environment directory, it is recommended to set `ro, nodev, nosuid` (read only, prohibit device files, and prohibit suid files) permissions. 
   * For writable bind directories, it is recommended to set `nodev, noexec, nosuid` (disable device files, disable executable files, disable suid files) permissions. 
 
