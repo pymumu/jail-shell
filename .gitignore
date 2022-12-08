@@ -1,0 +1,7 @@
+*.o
+jail-cmd/*.o
+jail-cmd/jail-cmd
+jail-cmd/jail-cmdd
+pam_jail_shell/*.o
+pam_jail_shell/*.so
+pam_jail_shell/jail-init

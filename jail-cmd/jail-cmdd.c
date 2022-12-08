@@ -326,7 +326,7 @@ int change_uid_gid_by_command(struct jail_cmd_cmd *cmd_cmd, char *jail_name, cha
 void run_process(struct jail_cmd_cmd *cmd_cmd, char *jail_name) 
 {
 	char cmd_name[PATH_MAX];
-	char cmd_path[PATH_MAX];
+	char cmd_path[PATH_MAX * 2];
 	char prog[PATH_MAX];
 	int len = 0;
 	int i = 0;
@@ -346,12 +346,12 @@ void run_process(struct jail_cmd_cmd *cmd_cmd, char *jail_name)
 		goto errout;
 	}
 
-	snprintf(cmd_name, PATH_MAX, "/%s", argv[0]);
+	snprintf(cmd_name, sizeof(cmd_name) - 1, "/%s", argv[0]);
 	if (normalize_path(cmd_name) <= 0) {
 		goto errout;
 	}
 
-	snprintf(cmd_path, PATH_MAX, "%s/%s%s", COMMAND_ROOT_PATH, jail_name, cmd_name);
+	snprintf(cmd_path, sizeof(cmd_path) - 1, "%s/%s%s", COMMAND_ROOT_PATH, jail_name, cmd_name);
 
 	len = readlink(cmd_path, prog, sizeof(prog));
 	if (len < 0) {

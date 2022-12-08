@@ -89,7 +89,7 @@ int cmd_init(struct cmd_context *context, int argc, char *argv[])
 
 	jsidkey = getenv(JAIL_KEY);
 	if (jsidkey) {
-		strncpy(cmd->jsid, getenv(JAIL_KEY), sizeof(cmd->jsid));
+		strncpy(cmd->jsid, getenv(JAIL_KEY), sizeof(cmd->jsid) - 1);
 	} else {
 		memset(cmd->jsid, 0, sizeof(cmd->jsid));
 	}

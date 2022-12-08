@@ -430,19 +430,19 @@ int mount_from_cfg(struct user_jail_struct *info, const char *user)
 
 int do_mount(struct user_jail_struct *info, const char *user, const char *root_path)
 {
-	char proc_path[PATH_MAX];
+	char proc_path[PATH_MAX * 2];
 	char pts_path[PATH_MAX];
-	char check_file[PATH_MAX];
-	char mount_cmd[PATH_MAX];
+	char check_file[PATH_MAX * 2];
+	char mount_cmd[PATH_MAX * 4];
 	struct stat buf;
 	uid_t ruid;
 	uid_t euid;
 	uid_t suid;
 	int ret = 0;
 
-	snprintf(proc_path, PATH_MAX, "%s/proc", root_path);
-	snprintf(pts_path, PATH_MAX, "%s/dev/pts", root_path);
-	snprintf(check_file, PATH_MAX, "%s/ptmx", pts_path);
+	snprintf(proc_path, sizeof(proc_path) - 1 , "%s/proc", root_path);
+	snprintf(pts_path, sizeof(pts_path) - 1 , "%s/dev/pts", root_path);
+	snprintf(check_file, sizeof(check_file) - 1, "%s/ptmx", pts_path);
 	/*  if jail is ready mounted, return */
 	if (lstat(check_file, &buf) == 0) {
 		return 0;
@@ -483,14 +483,14 @@ int do_mount(struct user_jail_struct *info, const char *user, const char *root_p
 		goto errout;
 	}
 
-	snprintf(mount_cmd, PATH_MAX, "mount -t proc proc %s -o nosuid,noexec,nodev,ro", proc_path);
+	snprintf(mount_cmd, sizeof(mount_cmd) - 1, "mount -t proc proc %s -o nosuid,noexec,nodev,ro", proc_path);
 	ret = system(mount_cmd);
 	if (ret != 0) {
 		pam_log(LOG_ERR, "run %s failed, ret = %d", mount_cmd, ret);
 		goto errout;
 	}
 
-	snprintf(mount_cmd, PATH_MAX, "mount -t devpts devpts %s -o nosuid,noexec", pts_path);
+	snprintf(mount_cmd, sizeof(mount_cmd) - 1, "mount -t devpts devpts %s -o nosuid,noexec", pts_path);
 	ret = system(mount_cmd);
 	if (ret != 0) {
 		pam_log(LOG_ERR, "run %s failed, ret = %d", mount_cmd, ret);
@@ -742,7 +742,7 @@ out:
 int set_jsid_env(pam_handle_t *pamh, struct user_jail_struct *info, const char *user)
 {
 	unsigned long rnd_num = -1;
-	char jsid_env[TMP_BUFF_LEN_32];
+	char jsid_env[PATH_MAX * 2];
 	char buff[MAX_LINE_LEN];
 	char jsid_file_path[PATH_MAX];
 	char pid_file[MAX_LINE_LEN];
@@ -833,7 +833,7 @@ int set_jsid_env(pam_handle_t *pamh, struct user_jail_struct *info, const char *
 			buff[line_end - buff] = 0;
 		}
 
-		snprintf(jsid_env, TMP_BUFF_LEN_32, "%s=%s", JAIL_KEY, buff);
+		snprintf(jsid_env, sizeof(jsid_env) - 1, "%s=%s", JAIL_KEY, buff);
 	}
 
 	/*  set JSID enviroment to shell */
@@ -912,7 +912,7 @@ int unshare_pid(struct user_jail_struct *info, char *user, char *chroot_path)
 int run_jail_post_script(const char *user, struct user_jail_struct *info)
 {
 	int ret;
-	char post_cmd[PATH_MAX];
+	char post_cmd[PATH_MAX * 2];
 	uid_t ruid;
 	uid_t euid;
 	uid_t suid;
@@ -931,7 +931,7 @@ int run_jail_post_script(const char *user, struct user_jail_struct *info)
 	}
 
 	/* LOGIN_POST_SCRIPT %user% %jail_root_path%*/
-	snprintf(post_cmd, PATH_MAX, "%s %s %s/%s", LOGIN_POST_SCRIPT, user, jail_home, info->jail);
+	snprintf(post_cmd, sizeof(post_cmd) - 1, "%s %s %s/%s", LOGIN_POST_SCRIPT, user, jail_home, info->jail);
 	ret = system(post_cmd);
 	
 	if (setresuid(ruid, euid, suid) != 0) {
@@ -950,7 +950,7 @@ int run_jail_post_script(const char *user, struct user_jail_struct *info)
 int start_jail(pam_handle_t *pamh, int flags, int argc, const char *argv[])
 {
 	struct user_jail_struct *info;
-	char jail_path[MAX_LINE_LEN];
+	char jail_path[MAX_LINE_LEN * 2];
 	char user[MAX_LINE_LEN];
 	const char *user_pam;
 
@@ -959,7 +959,7 @@ int start_jail(pam_handle_t *pamh, int flags, int argc, const char *argv[])
 		pam_log(LOG_ERR, "pam get user failed.");
 		return PAM_USER_UNKNOWN;
 	}
-	strncpy(user, user_pam, MAX_LINE_LEN);
+	strncpy(user, user_pam, MAX_LINE_LEN - 1);
 
 	/*  load configuration from jail-shell.conf */
 	if (load_config()) {
@@ -988,7 +988,7 @@ int start_jail(pam_handle_t *pamh, int flags, int argc, const char *argv[])
 		return PAM_SERVICE_ERR;
 	}
 
-	snprintf(jail_path, MAX_LINE_LEN, "%s/%s", jail_home, info->jail);
+	snprintf(jail_path, sizeof(jail_path) - 1, "%s/%s", jail_home, info->jail);
 	if (unshare_pid(info, user, jail_path) != 0) {
 		pam_log(LOG_ERR, "unshared namespace failed, user %s.", user);
 		return PAM_SERVICE_ERR;

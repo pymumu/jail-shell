@@ -135,7 +135,7 @@ int main(int argc, char *argv[])
 	while ((opt = getopt(argc, argv, "u:l:h")) != -1) {
 		switch (opt) {
 		case 'u':
-			strncpy(user, optarg, MAX_LINE_LEN);
+			strncpy(user, optarg, MAX_LINE_LEN - 1);
 			break;
 		case 'l':
 			lock_fd = atoi(optarg);
