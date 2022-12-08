@@ -10,7 +10,7 @@ alias l="ls -al"
 PATH="/bin:/usr/bin:/sbin:/usr/sbin"
 if [ "${PS1-}" ]; then
 	if [ "${BASH-}" ]; then 
-		PS1="\[\033[01;32m\]\\h\[\033[00m\]:\[\033[01;34m\]\w \$\[\033[00m\] "
+		PS1="\u@\h:\w "
 	else
 		if [ "`id -u`" -eq 0 ]; then
 			PS1="# "
@@ -27,6 +27,11 @@ ulimit -c 0
 HISTSIZE=1000
 EDITOR=e3
 VISUAL=e3
+TERM=xterm
+
+if [ ! -d "$HOME" ]; then
+	HOME=/home
+fi
 
 PAGER=more
 if [ -z "$INPUTRC" -a ! -f "$HOME/.inputrc" ]; then

@@ -65,6 +65,9 @@ add_system_depdence_libs()
 	if [ "`dirname $LIBDIR`" != "/" ]; then
 		echo "dir `dirname $LIBDIR` 0755 root:root" >> $SAMPLE_FILE
 	fi
+	if [ -z "$(echo $LIB_PATH | grep /usr)" ]; then
+		echo "dir /usr${LIB_PATH} 0755 root:root" >> $SAMPLE_FILE
+	fi
 	echo "dir `dirname $LIBNSS_DNS` 0755 root:root" >> $SAMPLE_FILE
 	echo "clink $LIBNSS_COMP $LIBNSS_COMP" >> $SAMPLE_FILE
 	echo "clink $LIBNSS_FILES $LIBNSS_FILES" >> $SAMPLE_FILE

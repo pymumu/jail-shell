@@ -822,7 +822,7 @@ main()
 	if [ "$ACTION" = "INSTALL" ]; then
 		install_jails $JAIL_NAME
 	elif [ "$ACTION" = "REMOVE" ]; then
-		remove $JAIL_NAME
+		remove_jail $JAIL_NAME
 	elif [ "$ACTION" = "CLEAN" ]; then
 		clean_jails $JAIL_NAME
 	elif [ "$ACTION" = "MOUNT" ]; then

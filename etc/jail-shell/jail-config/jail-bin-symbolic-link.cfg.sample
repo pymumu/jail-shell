@@ -62,6 +62,7 @@ dir /usr/sbin 0755 root:root
 dir /usr/lib/ 0755 root:root
 dir /usr/lib64/ 0755 root:root
 dir /etc/security 0755 root:root
+dir /usr/lib/terminfo 0755 root:root
 slink /usr/bin /bin
 slink /usr/sbin /sbin
 slink /usr/lib /lib
@@ -129,6 +130,7 @@ clink /usr/bin/find /usr/bin/find
 # Set directory read-only, and prohibit device files 
 bind / ro,nodev,nosuid
 bind /dev ro,dev,noexec,nosuid
+bind /usr/lib/terminfo /usr/lib/terminfo ro,nodev,nosuid
 
 # system command list
 # this used for user to change password.

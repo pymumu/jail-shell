@@ -63,6 +63,7 @@ dir /proc/ 0755 root:root
 dir /usr/bin 0755 root:root
 dir /usr/sbin 0755 root:root
 dir /etc/security 0755 root:root
+dir /usr/lib/terminfo 0755 root:root
 
 # basic configration files
 clink /etc/ld.so.conf /etc/ld.so.conf
@@ -126,6 +127,7 @@ clink /usr/bin/find /usr/bin/find
 # Set directory read-only, and prohibit device files 
 bind / ro,nodev,nosuid
 bind /dev ro,dev,noexec,nosuid
+bind /usr/lib/terminfo /usr/lib/terminfo ro,nodev,nosuid
 
 # export a writable upload directory.
 # dir /upload 0755 root:root
